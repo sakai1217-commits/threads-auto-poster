@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Threads Auto Poster",
-  description: "AIが生成した投稿をThreadsに自動投稿",
+  title: "Threads占い自動投稿AI",
+  description: "AIが生成したスピリチュアル投稿をThreadsに自動投稿",
 };
 
 export default function RootLayout({

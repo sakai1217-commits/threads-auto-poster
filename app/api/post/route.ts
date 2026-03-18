@@ -11,6 +11,7 @@ export async function POST(request: NextRequest) {
       threadsUserId,
       anthropicApiKey,
       topic,
+      referenceData,
     } = body;
 
     if (!threadsAccessToken || !threadsUserId || !anthropicApiKey || !topic) {
@@ -28,14 +29,15 @@ export async function POST(request: NextRequest) {
       messages: [
         {
           role: "user",
-          content: `あなたはThreads（SNS）の投稿を作成するライターです。
+          content: `あなたはThreads（SNS）の占い・スピリチュアル系アカウントの投稿を作成するライターです。
 以下のテーマに関する魅力的な投稿を1つ作成してください。
 
 テーマ: ${topic}
+${referenceData ? `\n参考データ（競合投稿やトレンド情報）:\n${referenceData}\n\n上記の参考データを分析し、差別化しつつトレンドを押さえた投稿を作成してください。` : ""}
 
 ルール:
 - 500文字以内
-- 自然で親しみやすいトーン
+- スピリチュアル・占い系の温かく神秘的なトーン
 - ハッシュタグは2〜3個
 - 絵文字は適度に使用
 - 宣伝っぽくならないこと
