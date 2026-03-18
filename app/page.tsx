@@ -1,6 +1,25 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
+
+// --- localStorage helpers ---
+function loadFromStorage<T>(key: string, fallback: T): T {
+  if (typeof window === "undefined") return fallback;
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return fallback;
+    return JSON.parse(raw);
+  } catch {
+    return fallback;
+  }
+}
+
+function saveToStorage(key: string, value: unknown) {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch { /* storage full or unavailable */ }
+}
 
 // --- Types ---
 interface UploadedFile {
@@ -138,6 +157,7 @@ type TabKey = "dashboard" | "files" | "analytics" | "schedule" | "recent" | "rev
 
 // --- Main Component ---
 export default function Home() {
+  const [initialized, setInitialized] = useState(false);
   const [activeTab, setActiveTab] = useState<TabKey>("dashboard");
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const [threadsAccessToken, setThreadsAccessToken] = useState("");
@@ -146,6 +166,42 @@ export default function Home() {
   const [drafts, setDrafts] = useState<DraftPost[]>([]);
   const [postTypes, setPostTypes] = useState<PostType[]>([]);
   const [scheduleEntries, setScheduleEntries] = useState<ScheduleEntry[]>([]);
+
+  // Load from localStorage on mount
+  useEffect(() => {
+    setThreadsAccessToken(loadFromStorage("tap_threadsToken", ""));
+    setThreadsUserId(loadFromStorage("tap_threadsUserId", ""));
+    setAnthropicApiKey(loadFromStorage("tap_anthropicKey", ""));
+    setDrafts(loadFromStorage<DraftPost[]>("tap_drafts", []).map((d) => ({ ...d, createdAt: new Date(d.createdAt) })));
+    setPostTypes(loadFromStorage("tap_postTypes", []));
+    setScheduleEntries(loadFromStorage("tap_schedule", []));
+    setInitialized(true);
+  }, []);
+
+  // Save to localStorage on change
+  const saveSettings = useCallback(() => {
+    if (!initialized) return;
+    saveToStorage("tap_threadsToken", threadsAccessToken);
+    saveToStorage("tap_threadsUserId", threadsUserId);
+    saveToStorage("tap_anthropicKey", anthropicApiKey);
+  }, [initialized, threadsAccessToken, threadsUserId, anthropicApiKey]);
+
+  useEffect(() => { saveSettings(); }, [saveSettings]);
+
+  useEffect(() => {
+    if (!initialized) return;
+    saveToStorage("tap_drafts", drafts);
+  }, [initialized, drafts]);
+
+  useEffect(() => {
+    if (!initialized) return;
+    saveToStorage("tap_postTypes", postTypes);
+  }, [initialized, postTypes]);
+
+  useEffect(() => {
+    if (!initialized) return;
+    saveToStorage("tap_schedule", scheduleEntries);
+  }, [initialized, scheduleEntries]);
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
