@@ -1,17 +1,26 @@
 import { NextResponse } from "next/server";
-import { isAuthenticated } from "@/lib/auth";
+import { getAuthUserId } from "@/lib/auth";
+import { getUserById } from "@/lib/db";
 
 export async function GET() {
-  const authed = await isAuthenticated();
+  const userId = await getAuthUserId();
+  if (!userId) {
+    return NextResponse.json({ authenticated: false, apiConfigured: false });
+  }
 
-  // Also check if server-side API keys are configured
+  const user = await getUserById(userId);
+  if (!user) {
+    return NextResponse.json({ authenticated: false, apiConfigured: false });
+  }
+
   const apiConfigured =
-    !!process.env.ANTHROPIC_API_KEY &&
-    !!process.env.THREADS_ACCESS_TOKEN &&
-    !!process.env.THREADS_USER_ID;
+    !!user.anthropic_api_key &&
+    !!user.threads_access_token &&
+    !!user.threads_user_id;
 
   return NextResponse.json({
-    authenticated: authed,
+    authenticated: true,
     apiConfigured,
+    email: user.email,
   });
 }

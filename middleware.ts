@@ -1,21 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
+import { verifySessionTokenEdge } from "@/lib/auth";
 
-const PUBLIC_PATHS = ["/api/auth/login", "/api/auth/check", "/api/cron"];
-
-async function computeExpectedToken(secret: string): Promise<string> {
-  const encoder = new TextEncoder();
-  const key = await crypto.subtle.importKey(
-    "raw",
-    encoder.encode(secret),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"]
-  );
-  const sig = await crypto.subtle.sign("HMAC", key, encoder.encode("authenticated"));
-  return Array.from(new Uint8Array(sig))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-}
+const PUBLIC_PATHS = ["/api/auth/login", "/api/auth/register", "/api/auth/check", "/api/cron", "/api/setup"];
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -46,13 +32,17 @@ export async function middleware(request: NextRequest) {
   }
 
   const secret = process.env.AUTH_SECRET || "dev-fallback-secret-change-me";
-  const expected = await computeExpectedToken(secret);
+  const result = await verifySessionTokenEdge(session.value, secret);
 
-  if (session.value !== expected) {
+  if (!result) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  return NextResponse.next();
+  // Pass user ID to API routes via header
+  const requestHeaders = new Headers(request.headers);
+  requestHeaders.set("x-user-id", result.userId.toString());
+
+  return NextResponse.next({ request: { headers: requestHeaders } });
 }
 
 export const config = {

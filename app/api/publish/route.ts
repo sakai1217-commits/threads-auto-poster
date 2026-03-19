@@ -1,21 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getUserById } from "@/lib/db";
 
 const THREADS_API_BASE = "https://graph.threads.net/v1.0";
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
-    const { text } = body;
+    const userId = Number(request.headers.get("x-user-id"));
+    const user = await getUserById(userId);
 
-    const threadsAccessToken = process.env.THREADS_ACCESS_TOKEN;
-    const threadsUserId = process.env.THREADS_USER_ID;
-
-    if (!threadsAccessToken || !threadsUserId) {
+    if (!user?.threads_access_token || !user?.threads_user_id) {
       return NextResponse.json(
-        { error: "Threads APIがサーバーに設定されていません" },
-        { status: 500 }
+        { error: "設定画面からThreads APIを登録してください" },
+        { status: 400 }
       );
     }
+
+    const body = await request.json();
+    const { text } = body;
 
     if (!text) {
       return NextResponse.json(
@@ -26,14 +27,14 @@ export async function POST(request: NextRequest) {
 
     // Step 1 - メディアコンテナ作成
     const createRes = await fetch(
-      `${THREADS_API_BASE}/${threadsUserId}/threads`,
+      `${THREADS_API_BASE}/${user.threads_user_id}/threads`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           media_type: "TEXT",
           text,
-          access_token: threadsAccessToken,
+          access_token: user.threads_access_token,
         }),
       }
     );
@@ -47,13 +48,13 @@ export async function POST(request: NextRequest) {
 
     // Step 2 - 公開
     const publishRes = await fetch(
-      `${THREADS_API_BASE}/${threadsUserId}/threads_publish`,
+      `${THREADS_API_BASE}/${user.threads_user_id}/threads_publish`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           creation_id: creationId,
-          access_token: threadsAccessToken,
+          access_token: user.threads_access_token,
         }),
       }
     );

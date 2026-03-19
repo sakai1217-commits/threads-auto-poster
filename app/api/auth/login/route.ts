@@ -1,19 +1,37 @@
 import { NextRequest, NextResponse } from "next/server";
-import { computeSessionToken } from "@/lib/auth";
+import bcrypt from "bcryptjs";
+import { getUserByEmail } from "@/lib/db";
+import { createSessionToken } from "@/lib/auth";
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { password } = body;
+    const { email, password } = body;
 
-    if (!password || password !== process.env.AUTH_PASSWORD) {
+    if (!email || !password) {
       return NextResponse.json(
-        { error: "パスワードが正しくありません" },
+        { error: "メールアドレスとパスワードを入力してください" },
+        { status: 400 }
+      );
+    }
+
+    const user = await getUserByEmail(email);
+    if (!user) {
+      return NextResponse.json(
+        { error: "メールアドレスまたはパスワードが正しくありません" },
         { status: 401 }
       );
     }
 
-    const token = computeSessionToken();
+    const valid = await bcrypt.compare(password, user.password_hash);
+    if (!valid) {
+      return NextResponse.json(
+        { error: "メールアドレスまたはパスワードが正しくありません" },
+        { status: 401 }
+      );
+    }
+
+    const token = createSessionToken(user.id);
     const response = NextResponse.json({ success: true });
 
     response.cookies.set("session", token, {
@@ -21,11 +39,12 @@ export async function POST(request: NextRequest) {
       secure: process.env.NODE_ENV === "production",
       sameSite: "lax",
       path: "/",
-      maxAge: 60 * 60 * 24 * 7, // 7 days
+      maxAge: 60 * 60 * 24 * 7,
     });
 
     return response;
-  } catch {
+  } catch (error) {
+    console.error("Login failed:", error);
     return NextResponse.json(
       { error: "ログインに失敗しました" },
       { status: 500 }

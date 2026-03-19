@@ -1,22 +1,30 @@
 import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
+import { getUserById } from "@/lib/db";
 
 const THREADS_API_BASE = "https://graph.threads.net/v1.0";
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
-    const { topic, referenceData } = body;
+    const userId = Number(request.headers.get("x-user-id"));
+    const user = await getUserById(userId);
 
-    const threadsAccessToken = process.env.THREADS_ACCESS_TOKEN;
-    const threadsUserId = process.env.THREADS_USER_ID;
-
-    if (!threadsAccessToken || !threadsUserId) {
+    if (!user?.anthropic_api_key) {
       return NextResponse.json(
-        { error: "Threads APIがサーバーに設定されていません" },
-        { status: 500 }
+        { error: "設定画面からAnthropic APIキーを登録してください" },
+        { status: 400 }
       );
     }
+
+    if (!user?.threads_access_token || !user?.threads_user_id) {
+      return NextResponse.json(
+        { error: "設定画面からThreads APIを登録してください" },
+        { status: 400 }
+      );
+    }
+
+    const body = await request.json();
+    const { topic, referenceData } = body;
 
     if (!topic) {
       return NextResponse.json(
@@ -26,7 +34,7 @@ export async function POST(request: NextRequest) {
     }
 
     // AIで投稿内容を生成
-    const client = new Anthropic();
+    const client = new Anthropic({ apiKey: user.anthropic_api_key });
     const message = await client.messages.create({
       model: "claude-sonnet-4-20250514",
       max_tokens: 300,
@@ -56,16 +64,16 @@ ${referenceData ? `\n参考データ（競合投稿やトレンド情報）:\n${
     }
     const text = block.text;
 
-    // Threadsに投稿: Step 1 - メディアコンテナ作成
+    // Threadsに投稿
     const createRes = await fetch(
-      `${THREADS_API_BASE}/${threadsUserId}/threads`,
+      `${THREADS_API_BASE}/${user.threads_user_id}/threads`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           media_type: "TEXT",
           text,
-          access_token: threadsAccessToken,
+          access_token: user.threads_access_token,
         }),
       }
     );
@@ -77,15 +85,14 @@ ${referenceData ? `\n参考データ（競合投稿やトレンド情報）:\n${
 
     const { id: creationId } = await createRes.json();
 
-    // Step 2 - 公開
     const publishRes = await fetch(
-      `${THREADS_API_BASE}/${threadsUserId}/threads_publish`,
+      `${THREADS_API_BASE}/${user.threads_user_id}/threads_publish`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           creation_id: creationId,
-          access_token: threadsAccessToken,
+          access_token: user.threads_access_token,
         }),
       }
     );

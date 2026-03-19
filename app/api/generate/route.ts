@@ -1,8 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
+import { getUserById } from "@/lib/db";
 
 export async function POST(request: NextRequest) {
   try {
+    const userId = Number(request.headers.get("x-user-id"));
+    const user = await getUserById(userId);
+
+    if (!user?.anthropic_api_key) {
+      return NextResponse.json(
+        { error: "設定画面からAnthropic APIキーを登録してください" },
+        { status: 400 }
+      );
+    }
+
     const body = await request.json();
     const { topic, referenceData } = body;
 
@@ -13,7 +24,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const client = new Anthropic();
+    const client = new Anthropic({ apiKey: user.anthropic_api_key });
     const message = await client.messages.create({
       model: "claude-sonnet-4-20250514",
       max_tokens: 300,
