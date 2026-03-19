@@ -195,15 +195,56 @@ function useServerData<T>(
   return [data, setDataAndSave, loaded];
 }
 
-// --- Auth Screen (Login + Register) ---
+// --- Auth Screen (Login + Register + Reset) ---
 function AuthScreen({ onLogin }: { onLogin: () => void }) {
-  const [mode, setMode] = useState<"login" | "register">("login");
+  const [mode, setMode] = useState<"login" | "register" | "reset-request" | "reset-confirm">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [resetCode, setResetCode] = useState("");
+  const [newPassword, setNewPassword] = useState("");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [loading, setLoading] = useState(false);
+
+  const handleResetRequest = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setError("");
+    try {
+      const res = await fetch("/api/auth/reset-request", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setError(data.error); return; }
+      setSuccess("リセットコードをメールに送信しました");
+      setMode("reset-confirm");
+    } catch { setError("送信に失敗しました"); }
+    finally { setLoading(false); }
+  };
+
+  const handleResetConfirm = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setError("");
+    try {
+      const res = await fetch("/api/auth/reset-confirm", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token: resetCode, newPassword }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setError(data.error); return; }
+      setSuccess("パスワードを変更しました。ログインしてください。");
+      setMode("login");
+      setPassword("");
+      setResetCode("");
+      setNewPassword("");
+    } catch { setError("リセットに失敗しました"); }
+    finally { setLoading(false); }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -282,68 +323,79 @@ function AuthScreen({ onLogin }: { onLogin: () => void }) {
             Threads占い 自動投稿AI
           </h1>
           <p style={{ fontSize: "0.78rem", color: "#a89bbe" }}>
-            {mode === "login" ? "ログインしてください" : "新規アカウント登録"}
+            {mode === "login" && "ログインしてください"}
+            {mode === "register" && "新規アカウント登録"}
+            {mode === "reset-request" && "パスワードリセット"}
+            {mode === "reset-confirm" && "リセットコードを入力"}
           </p>
         </div>
 
-        <form onSubmit={handleSubmit}>
-          <input
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            placeholder="メールアドレス"
-            style={darkInput}
-            autoFocus
-          />
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder="パスワード"
-            style={darkInput}
-          />
-          {mode === "register" && (
-            <input
-              type="password"
-              value={confirmPassword}
-              onChange={(e) => setConfirmPassword(e.target.value)}
-              placeholder="パスワード（確認）"
-              style={darkInput}
-            />
+        {(mode === "login" || mode === "register") && (
+          <form onSubmit={handleSubmit}>
+            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="メールアドレス" style={darkInput} autoFocus />
+            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="パスワード" style={darkInput} />
+            {mode === "register" && (
+              <input type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} placeholder="パスワード（確認）" style={darkInput} />
+            )}
+            <button type="submit" disabled={loading || !email || !password} style={{ ...btnPrimary, width: "100%", padding: "0.75rem", opacity: loading ? 0.6 : 1, cursor: loading ? "not-allowed" : "pointer", marginBottom: "1rem" }}>
+              {loading ? (mode === "login" ? "ログイン中..." : "登録中...") : (mode === "login" ? "ログイン" : "アカウントを作成")}
+            </button>
+          </form>
+        )}
+
+        {mode === "reset-request" && (
+          <form onSubmit={handleResetRequest}>
+            <p style={{ fontSize: "0.82rem", color: "#c4b5d9", marginBottom: "1rem" }}>
+              登録したメールアドレスにリセットコードを送信します
+            </p>
+            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="メールアドレス" style={darkInput} autoFocus />
+            <button type="submit" disabled={loading || !email} style={{ ...btnPrimary, width: "100%", padding: "0.75rem", opacity: loading ? 0.6 : 1, cursor: loading ? "not-allowed" : "pointer", marginBottom: "1rem" }}>
+              {loading ? "送信中..." : "リセットコードを送信"}
+            </button>
+          </form>
+        )}
+
+        {mode === "reset-confirm" && (
+          <form onSubmit={handleResetConfirm}>
+            <p style={{ fontSize: "0.82rem", color: "#c4b5d9", marginBottom: "1rem" }}>
+              メールに届いた6桁のコードと新しいパスワードを入力してください
+            </p>
+            <input type="text" value={resetCode} onChange={(e) => setResetCode(e.target.value)} placeholder="6桁のリセットコード" style={{ ...darkInput, textAlign: "center", fontSize: "1.2rem", letterSpacing: "0.3em" }} autoFocus />
+            <input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="新しいパスワード（8文字以上）" style={darkInput} />
+            <button type="submit" disabled={loading || !resetCode || !newPassword} style={{ ...btnPrimary, width: "100%", padding: "0.75rem", opacity: loading ? 0.6 : 1, cursor: loading ? "not-allowed" : "pointer", marginBottom: "1rem" }}>
+              {loading ? "変更中..." : "パスワードを変更"}
+            </button>
+          </form>
+        )}
+
+        <div style={{ textAlign: "center", display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+          {mode === "login" && (
+            <button
+              onClick={() => { setMode("reset-request"); setError(""); setSuccess(""); }}
+              style={{
+                background: "none", border: "none", color: "#a89bbe", fontSize: "0.78rem", cursor: "pointer", fontFamily: "inherit",
+              }}>
+              パスワードを忘れた方
+            </button>
           )}
           <button
-            type="submit"
-            disabled={loading || !email || !password}
+            onClick={() => { setMode(mode === "login" ? "register" : "login"); setError(""); setSuccess(""); setResetCode(""); setNewPassword(""); }}
             style={{
-              ...btnPrimary,
-              width: "100%",
-              padding: "0.75rem",
-              opacity: loading ? 0.6 : 1,
-              cursor: loading ? "not-allowed" : "pointer",
-              marginBottom: "1rem",
+              background: "none", border: "none", color: "#c084fc", fontSize: "0.82rem", cursor: "pointer", textDecoration: "underline", fontFamily: "inherit",
             }}
           >
-            {loading
-              ? mode === "login" ? "ログイン中..." : "登録中..."
-              : mode === "login" ? "ログイン" : "アカウントを作成"}
+            {mode === "login" || mode === "reset-request" || mode === "reset-confirm" ? "アカウントを新規作成" : "ログインはこちら"}
           </button>
-        </form>
-
-        <div style={{ textAlign: "center" }}>
-          <button
-            onClick={() => { setMode(mode === "login" ? "register" : "login"); setError(""); setSuccess(""); }}
-            style={{
-              background: "none",
-              border: "none",
-              color: "#c084fc",
-              fontSize: "0.82rem",
-              cursor: "pointer",
-              textDecoration: "underline",
-              fontFamily: "inherit",
-            }}
-          >
-            {mode === "login" ? "アカウントを新規作成" : "ログインはこちら"}
-          </button>
+          {(mode === "reset-request" || mode === "reset-confirm") && (
+            <button
+              onClick={() => { setMode("login"); setError(""); setSuccess(""); }}
+              style={{
+                background: "none", border: "none", color: "#a89bbe", fontSize: "0.78rem", cursor: "pointer", fontFamily: "inherit",
+              }}
+            >
+              ログインに戻る
+            </button>
+          )}
         </div>
 
         {error && (

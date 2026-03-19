@@ -36,6 +36,13 @@ export async function POST(request: NextRequest) {
       )
     `;
 
+    // パスワードリセット用カラムを追加（既存テーブルに）
+    await sql`
+      ALTER TABLE users
+      ADD COLUMN IF NOT EXISTS reset_token VARCHAR(255),
+      ADD COLUMN IF NOT EXISTS reset_token_expires TIMESTAMP
+    `;
+
     return NextResponse.json({ success: true, message: "テーブルを作成しました" });
   } catch (error) {
     console.error("Setup failed:", error);

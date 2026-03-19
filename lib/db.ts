@@ -11,6 +11,8 @@ export interface DbUser {
   threads_user_id: string | null;
   post_topic: string | null;
   created_at: Date;
+  reset_token: string | null;
+  reset_token_expires: Date | null;
   updated_at: Date;
 }
 
@@ -48,6 +50,36 @@ export async function updateUserKeys(
       threads_access_token = COALESCE(${keys.threads_access_token ?? null}, threads_access_token),
       threads_user_id = COALESCE(${keys.threads_user_id ?? null}, threads_user_id),
       post_topic = COALESCE(${keys.post_topic ?? null}, post_topic),
+      updated_at = NOW()
+    WHERE id = ${userId}
+  `;
+}
+
+export async function setResetToken(email: string, token: string, expiresAt: Date): Promise<void> {
+  await sql`
+    UPDATE users SET
+      reset_token = ${token},
+      reset_token_expires = ${expiresAt.toISOString()},
+      updated_at = NOW()
+    WHERE email = ${email}
+  `;
+}
+
+export async function getUserByResetToken(token: string): Promise<DbUser | null> {
+  const result = await sql`
+    SELECT * FROM users
+    WHERE reset_token = ${token} AND reset_token_expires > NOW()
+    LIMIT 1
+  `;
+  return (result.rows[0] as DbUser) || null;
+}
+
+export async function resetPassword(userId: number, passwordHash: string): Promise<void> {
+  await sql`
+    UPDATE users SET
+      password_hash = ${passwordHash},
+      reset_token = NULL,
+      reset_token_expires = NULL,
       updated_at = NOW()
     WHERE id = ${userId}
   `;
