@@ -153,40 +153,155 @@ const btnSecondary: React.CSSProperties = {
   fontFamily: "inherit",
 };
 
-type TabKey = "dashboard" | "files" | "analytics" | "schedule" | "recent" | "review" | "settings";
+type TabKey = "dashboard" | "files" | "analytics" | "schedule" | "recent" | "review";
+
+// --- Helper: handle 401 responses ---
+async function authFetch(url: string, options: RequestInit, onUnauth: () => void): Promise<Response> {
+  const res = await fetch(url, options);
+  if (res.status === 401) {
+    onUnauth();
+    throw new Error("セッションが切れました。再ログインしてください。");
+  }
+  return res;
+}
+
+// --- Login Screen ---
+function LoginScreen({ onLogin }: { onLogin: () => void }) {
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setError("");
+
+    try {
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json();
+        setError(data.error || "ログインに失敗しました");
+        return;
+      }
+
+      onLogin();
+    } catch {
+      setError("ログインに失敗しました");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div style={{
+      minHeight: "100vh",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      background: "linear-gradient(135deg, #1a0533 0%, #2d1b4e 50%, #1a0533 100%)",
+    }}>
+      <div style={{
+        ...card,
+        width: "100%",
+        maxWidth: 400,
+        padding: "2.5rem",
+        background: "rgba(45, 27, 78, 0.85)",
+        border: "1px solid rgba(168, 85, 247, 0.2)",
+      }}>
+        <div style={{ textAlign: "center", marginBottom: "2rem" }}>
+          <h1 style={{
+            fontSize: "1.3rem",
+            fontWeight: 700,
+            background: "linear-gradient(135deg, #c084fc, #fde68a)",
+            WebkitBackgroundClip: "text",
+            WebkitTextFillColor: "transparent",
+            marginBottom: "0.5rem",
+          }}>
+            Threads占い 自動投稿AI
+          </h1>
+          <p style={{ fontSize: "0.78rem", color: "#a89bbe" }}>
+            ログインしてください
+          </p>
+        </div>
+
+        <form onSubmit={handleSubmit}>
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="パスワード"
+            style={{
+              ...inputStyle,
+              marginBottom: "1rem",
+              background: "rgba(255, 255, 255, 0.06)",
+              border: "1px solid rgba(168, 85, 247, 0.3)",
+              color: "#e9d5ff",
+            }}
+            autoFocus
+          />
+          <button
+            type="submit"
+            disabled={loading || !password}
+            style={{
+              ...btnPrimary,
+              width: "100%",
+              padding: "0.75rem",
+              opacity: loading ? 0.6 : 1,
+              cursor: loading ? "not-allowed" : "pointer",
+            }}
+          >
+            {loading ? "ログイン中..." : "ログイン"}
+          </button>
+        </form>
+
+        {error && (
+          <p style={{ fontSize: "0.82rem", color: "#ef4444", marginTop: "0.75rem", textAlign: "center" }}>
+            {error}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
 
 // --- Main Component ---
 export default function Home() {
+  const [authChecked, setAuthChecked] = useState(false);
+  const [authenticated, setAuthenticated] = useState(false);
+  const [apiConfigured, setApiConfigured] = useState(false);
+
   const [initialized, setInitialized] = useState(false);
   const [activeTab, setActiveTab] = useState<TabKey>("dashboard");
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
-  const [threadsAccessToken, setThreadsAccessToken] = useState("");
-  const [threadsUserId, setThreadsUserId] = useState("");
-  const [anthropicApiKey, setAnthropicApiKey] = useState("");
   const [drafts, setDrafts] = useState<DraftPost[]>([]);
   const [postTypes, setPostTypes] = useState<PostType[]>([]);
   const [scheduleEntries, setScheduleEntries] = useState<ScheduleEntry[]>([]);
 
-  // Load from localStorage on mount
+  // Check auth on mount
   useEffect(() => {
-    setThreadsAccessToken(loadFromStorage("tap_threadsToken", ""));
-    setThreadsUserId(loadFromStorage("tap_threadsUserId", ""));
-    setAnthropicApiKey(loadFromStorage("tap_anthropicKey", ""));
+    fetch("/api/auth/check")
+      .then((r) => r.json())
+      .then((d) => {
+        setAuthenticated(d.authenticated);
+        setApiConfigured(d.apiConfigured);
+        setAuthChecked(true);
+      })
+      .catch(() => setAuthChecked(true));
+  }, []);
+
+  // Load from localStorage on mount (after auth)
+  useEffect(() => {
+    if (!authenticated) return;
     setDrafts(loadFromStorage<DraftPost[]>("tap_drafts", []).map((d) => ({ ...d, createdAt: new Date(d.createdAt) })));
     setPostTypes(loadFromStorage("tap_postTypes", []));
     setScheduleEntries(loadFromStorage("tap_schedule", []));
     setInitialized(true);
-  }, []);
-
-  // Save to localStorage on change
-  const saveSettings = useCallback(() => {
-    if (!initialized) return;
-    saveToStorage("tap_threadsToken", threadsAccessToken);
-    saveToStorage("tap_threadsUserId", threadsUserId);
-    saveToStorage("tap_anthropicKey", anthropicApiKey);
-  }, [initialized, threadsAccessToken, threadsUserId, anthropicApiKey]);
-
-  useEffect(() => { saveSettings(); }, [saveSettings]);
+  }, [authenticated]);
 
   useEffect(() => {
     if (!initialized) return;
@@ -232,7 +347,43 @@ export default function Home() {
     setDrafts((prev) => prev.map((d) => d.id === id ? { ...d, status } : d));
   };
 
-  const isApiConfigured = !!threadsAccessToken && !!threadsUserId && !!anthropicApiKey;
+  const handleLogout = async () => {
+    await fetch("/api/auth/logout", { method: "POST" });
+    setAuthenticated(false);
+  };
+
+  const handleUnauth = useCallback(() => {
+    setAuthenticated(false);
+  }, []);
+
+  // Loading state
+  if (!authChecked) {
+    return (
+      <div style={{
+        minHeight: "100vh",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        background: "linear-gradient(135deg, #1a0533 0%, #2d1b4e 50%, #1a0533 100%)",
+        color: "#a89bbe",
+        fontSize: "0.9rem",
+      }}>
+        読み込み中...
+      </div>
+    );
+  }
+
+  // Login gate
+  if (!authenticated) {
+    return <LoginScreen onLogin={() => {
+      setAuthenticated(true);
+      // Re-check API config
+      fetch("/api/auth/check")
+        .then((r) => r.json())
+        .then((d) => setApiConfigured(d.apiConfigured))
+        .catch(() => {});
+    }} />;
+  }
 
   const tabs: { key: TabKey; label: string }[] = [
     { key: "dashboard", label: "ダッシュボード" },
@@ -241,7 +392,6 @@ export default function Home() {
     { key: "schedule", label: "投稿スケジュール" },
     { key: "recent", label: "最近の投稿" },
     { key: "review", label: "投稿確認" },
-    { key: "settings", label: "設定" },
   ];
 
   return (
@@ -316,19 +466,34 @@ export default function Home() {
           ))}
         </nav>
 
-        <div style={{ marginTop: "auto", padding: "0 1rem" }}>
+        <div style={{ marginTop: "auto", padding: "0 1rem", display: "flex", flexDirection: "column", gap: "0.5rem" }}>
           <div style={{
             padding: "0.65rem",
             borderRadius: 8,
-            background: isApiConfigured ? "rgba(34, 197, 94, 0.12)" : "rgba(168, 85, 247, 0.12)",
+            background: apiConfigured ? "rgba(34, 197, 94, 0.12)" : "rgba(168, 85, 247, 0.12)",
             fontSize: "0.7rem",
-            color: isApiConfigured ? "#86efac" : "#c4b5d9",
+            color: apiConfigured ? "#86efac" : "#c4b5d9",
             lineHeight: 1.5,
           }}>
-            {isApiConfigured ? "API接続済み" : "API未接続"}
+            {apiConfigured ? "API接続済み" : "API未設定"}
             <br />
-            {isApiConfigured ? "投稿の生成・公開が可能です" : "設定から接続してください"}
+            {apiConfigured ? "投稿の生成・公開が可能です" : "環境変数を設定してください"}
           </div>
+          <button
+            onClick={handleLogout}
+            style={{
+              background: "rgba(220, 38, 38, 0.1)",
+              border: "1px solid rgba(220, 38, 38, 0.2)",
+              borderRadius: 8,
+              padding: "0.5rem",
+              color: "#fca5a5",
+              fontSize: "0.75rem",
+              cursor: "pointer",
+              fontFamily: "inherit",
+            }}
+          >
+            ログアウト
+          </button>
         </div>
       </aside>
 
@@ -337,7 +502,7 @@ export default function Home() {
         {activeTab === "dashboard" && (
           <DashboardTab
             drafts={drafts}
-            isApiConfigured={isApiConfigured}
+            isApiConfigured={apiConfigured}
             onNavigate={setActiveTab}
           />
         )}
@@ -346,10 +511,11 @@ export default function Home() {
         )}
         {activeTab === "analytics" && (
           <AnalyticsTab
-            anthropicApiKey={anthropicApiKey}
             postTypes={postTypes}
             setPostTypes={setPostTypes}
             onNavigate={setActiveTab}
+            isApiConfigured={apiConfigured}
+            onUnauth={handleUnauth}
           />
         )}
         {activeTab === "schedule" && (
@@ -364,23 +530,11 @@ export default function Home() {
         {activeTab === "review" && (
           <ReviewTab
             drafts={drafts}
-            anthropicApiKey={anthropicApiKey}
-            threadsAccessToken={threadsAccessToken}
-            threadsUserId={threadsUserId}
             uploadedFiles={uploadedFiles}
             onAddDraft={addDraft}
             onUpdateStatus={updateDraftStatus}
-            isApiConfigured={isApiConfigured}
-          />
-        )}
-        {activeTab === "settings" && (
-          <SettingsTab
-            threadsAccessToken={threadsAccessToken}
-            setThreadsAccessToken={setThreadsAccessToken}
-            threadsUserId={threadsUserId}
-            setThreadsUserId={setThreadsUserId}
-            anthropicApiKey={anthropicApiKey}
-            setAnthropicApiKey={setAnthropicApiKey}
+            isApiConfigured={apiConfigured}
+            onUnauth={handleUnauth}
           />
         )}
       </main>
@@ -446,11 +600,6 @@ function DashboardTab({
           <button style={btnSecondary} onClick={() => onNavigate("analytics")}>
             分析を見る
           </button>
-          {!isApiConfigured && (
-            <button style={{ ...btnSecondary, borderColor: "#ef4444", color: "#ef4444" }} onClick={() => onNavigate("settings")}>
-              APIを設定する
-            </button>
-          )}
         </div>
       </div>
 
@@ -497,15 +646,17 @@ function DashboardTab({
 const TYPE_COLORS = ["#7c3aed", "#b8860b", "#059669", "#e11d48", "#2563eb", "#d97706"];
 
 function AnalyticsTab({
-  anthropicApiKey,
   postTypes,
   setPostTypes,
   onNavigate,
+  isApiConfigured,
+  onUnauth,
 }: {
-  anthropicApiKey: string;
   postTypes: PostType[];
   setPostTypes: (types: PostType[]) => void;
   onNavigate: (tab: TabKey) => void;
+  isApiConfigured: boolean;
+  onUnauth: () => void;
 }) {
   const [analyzing, setAnalyzing] = useState(false);
   const [error, setError] = useState("");
@@ -522,27 +673,27 @@ function AnalyticsTab({
   const maxEng = Math.max(...weeklyTrend.map((d) => d.engagement));
 
   const handleAnalyze = async () => {
-    if (!anthropicApiKey) {
-      setError("設定画面からAnthropic APIキーを入力してください");
+    if (!isApiConfigured) {
+      setError("サーバーにAPIキーが設定されていません");
       return;
     }
     setAnalyzing(true);
     setError("");
 
     try {
-      const res = await fetch("/api/analyze", {
+      const res = await authFetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ anthropicApiKey, posts: MOCK_POSTS }),
-      });
+        body: JSON.stringify({ posts: MOCK_POSTS }),
+      }, onUnauth);
       const data = await res.json();
       if (!res.ok) {
         setError(data.error);
         return;
       }
       setPostTypes(data.analysis.types);
-    } catch {
-      setError("分析に失敗しました");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "分析に失敗しました");
     } finally {
       setAnalyzing(false);
     }
@@ -793,7 +944,7 @@ function ScheduleTab({
                 <span style={{ fontSize: "0.75rem", color: "var(--text-secondary)" }}>投稿タイプ</span>
                 <select value={selectedTypeId} onChange={(e) => setSelectedTypeId(e.target.value)} style={inputStyle}>
                   <option value="">タイプを選択...</option>
-                  {postTypes.map((pt, i) => (
+                  {postTypes.map((pt) => (
                     <option key={pt.id} value={pt.id}>{pt.name} ({pt.recommendedFrequency}推奨)</option>
                   ))}
                 </select>
@@ -925,22 +1076,18 @@ function RecentPostsTab() {
 // ============================================================
 function ReviewTab({
   drafts,
-  anthropicApiKey,
-  threadsAccessToken,
-  threadsUserId,
   uploadedFiles,
   onAddDraft,
   onUpdateStatus,
   isApiConfigured,
+  onUnauth,
 }: {
   drafts: DraftPost[];
-  anthropicApiKey: string;
-  threadsAccessToken: string;
-  threadsUserId: string;
   uploadedFiles: UploadedFile[];
   onAddDraft: (draft: DraftPost) => void;
   onUpdateStatus: (id: string, status: DraftPost["status"]) => void;
   isApiConfigured: boolean;
+  onUnauth: () => void;
 }) {
   const [topic, setTopic] = useState("");
   const [generating, setGenerating] = useState(false);
@@ -948,8 +1095,8 @@ function ReviewTab({
   const [error, setError] = useState("");
 
   const handleGenerate = async () => {
-    if (!anthropicApiKey) {
-      setError("設定画面からAnthropic APIキーを入力してください");
+    if (!isApiConfigured) {
+      setError("サーバーにAPIキーが設定されていません");
       return;
     }
     if (!topic.trim()) {
@@ -965,15 +1112,14 @@ function ReviewTab({
       .join("\n\n");
 
     try {
-      const res = await fetch("/api/generate", {
+      const res = await authFetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          anthropicApiKey,
           topic,
           referenceData: fileContents || undefined,
         }),
-      });
+      }, onUnauth);
 
       const data = await res.json();
       if (!res.ok) {
@@ -989,16 +1135,16 @@ function ReviewTab({
         status: "pending",
       });
       setTopic("");
-    } catch {
-      setError("生成に失敗しました");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "生成に失敗しました");
     } finally {
       setGenerating(false);
     }
   };
 
   const handlePublish = async (draft: DraftPost) => {
-    if (!threadsAccessToken || !threadsUserId) {
-      setError("設定画面からThreads APIの情報を入力してください");
+    if (!isApiConfigured) {
+      setError("サーバーにAPIキーが設定されていません");
       return;
     }
 
@@ -1006,15 +1152,11 @@ function ReviewTab({
     setError("");
 
     try {
-      const res = await fetch("/api/publish", {
+      const res = await authFetch("/api/publish", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          threadsAccessToken,
-          threadsUserId,
-          text: draft.text,
-        }),
-      });
+        body: JSON.stringify({ text: draft.text }),
+      }, onUnauth);
 
       const data = await res.json();
       if (!res.ok) {
@@ -1023,8 +1165,8 @@ function ReviewTab({
       }
 
       onUpdateStatus(draft.id, "published");
-    } catch {
-      setError("公開に失敗しました");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "公開に失敗しました");
     } finally {
       setPublishing(null);
     }
@@ -1119,7 +1261,7 @@ function ReviewTab({
                 </div>
                 {!isApiConfigured && (
                   <p style={{ fontSize: "0.72rem", color: "#ef4444", marginTop: "0.4rem" }}>
-                    公開するには設定画面からThreads APIを接続してください
+                    公開するにはサーバーの環境変数にThreads APIを設定してください
                   </p>
                 )}
               </div>
@@ -1324,46 +1466,6 @@ function FilesTab({
 }
 
 // ============================================================
-// Settings Tab
-// ============================================================
-function SettingsTab({
-  threadsAccessToken, setThreadsAccessToken,
-  threadsUserId, setThreadsUserId,
-  anthropicApiKey, setAnthropicApiKey,
-}: {
-  threadsAccessToken: string; setThreadsAccessToken: (v: string) => void;
-  threadsUserId: string; setThreadsUserId: (v: string) => void;
-  anthropicApiKey: string; setAnthropicApiKey: (v: string) => void;
-}) {
-  return (
-    <div>
-      <h2 style={{ fontSize: "1.4rem", fontWeight: 700, marginBottom: "1.5rem" }}>設定</h2>
-
-      <div style={{ ...card, marginBottom: "1.5rem" }}>
-        <div style={sectionTitle}>Threads API 接続</div>
-        <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
-          <SettingsField label="アクセストークン" value={threadsAccessToken} onChange={setThreadsAccessToken} placeholder="IGQVJx..." type="password" />
-          <SettingsField label="ユーザーID" value={threadsUserId} onChange={setThreadsUserId} placeholder="1234567890" />
-        </div>
-      </div>
-
-      <div style={{ ...card, marginBottom: "1.5rem" }}>
-        <div style={sectionTitle}>Anthropic API 接続</div>
-        <SettingsField label="APIキー" value={anthropicApiKey} onChange={setAnthropicApiKey} placeholder="sk-ant-..." type="password" />
-      </div>
-
-      <div style={card}>
-        <div style={sectionTitle}>接続ステータス</div>
-        <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
-          <StatusRow label="Threads API" connected={!!threadsAccessToken && !!threadsUserId} />
-          <StatusRow label="Anthropic API" connected={!!anthropicApiKey} />
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ============================================================
 // Shared Components
 // ============================================================
 function ScheduleRow({ item }: { item: ScheduleItem }) {
@@ -1390,35 +1492,6 @@ function ScheduleRow({ item }: { item: ScheduleItem }) {
         color: item.status === "scheduled" ? "var(--purple-600)" : "var(--gold-600)",
       }}>
         {item.status === "scheduled" ? "予定" : "投稿済"}
-      </span>
-    </div>
-  );
-}
-
-function SettingsField({ label, value, onChange, placeholder, type = "text" }: {
-  label: string; value: string; onChange: (v: string) => void; placeholder: string; type?: string;
-}) {
-  return (
-    <label style={{ display: "flex", flexDirection: "column", gap: "0.3rem" }}>
-      <span style={{ fontSize: "0.8rem", color: "var(--text-secondary)", fontWeight: 500 }}>{label}</span>
-      <input type={type} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} style={inputStyle} />
-    </label>
-  );
-}
-
-function StatusRow({ label, connected }: { label: string; connected: boolean }) {
-  return (
-    <div style={{
-      display: "flex", alignItems: "center", justifyContent: "space-between",
-      padding: "0.6rem 0.75rem", borderRadius: 8, background: "rgba(107, 33, 168, 0.03)",
-    }}>
-      <span style={{ fontSize: "0.85rem" }}>{label}</span>
-      <span style={{
-        fontSize: "0.72rem", fontWeight: 500, padding: "0.15rem 0.6rem", borderRadius: 20,
-        background: connected ? "rgba(34, 197, 94, 0.1)" : "rgba(220, 38, 38, 0.08)",
-        color: connected ? "#16a34a" : "#dc2626",
-      }}>
-        {connected ? "接続済み" : "未接続"}
       </span>
     </div>
   );

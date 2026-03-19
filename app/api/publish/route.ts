@@ -5,11 +5,21 @@ const THREADS_API_BASE = "https://graph.threads.net/v1.0";
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { threadsAccessToken, threadsUserId, text } = body;
+    const { text } = body;
 
-    if (!threadsAccessToken || !threadsUserId || !text) {
+    const threadsAccessToken = process.env.THREADS_ACCESS_TOKEN;
+    const threadsUserId = process.env.THREADS_USER_ID;
+
+    if (!threadsAccessToken || !threadsUserId) {
       return NextResponse.json(
-        { error: "Threads APIの設定と投稿内容が必要です" },
+        { error: "Threads APIがサーバーに設定されていません" },
+        { status: 500 }
+      );
+    }
+
+    if (!text) {
+      return NextResponse.json(
+        { error: "投稿内容が必要です" },
         { status: 400 }
       );
     }

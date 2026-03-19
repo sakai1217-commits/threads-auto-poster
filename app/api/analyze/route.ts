@@ -4,16 +4,16 @@ import Anthropic from "@anthropic-ai/sdk";
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { anthropicApiKey, posts } = body;
+    const { posts } = body;
 
-    if (!anthropicApiKey || !posts || posts.length === 0) {
+    if (!posts || posts.length === 0) {
       return NextResponse.json(
-        { error: "APIキーと投稿データが必要です" },
+        { error: "投稿データが必要です" },
         { status: 400 }
       );
     }
 
-    const client = new Anthropic({ apiKey: anthropicApiKey });
+    const client = new Anthropic();
     const message = await client.messages.create({
       model: "claude-sonnet-4-20250514",
       max_tokens: 1000,

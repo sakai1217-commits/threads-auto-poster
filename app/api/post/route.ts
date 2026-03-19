@@ -6,23 +6,27 @@ const THREADS_API_BASE = "https://graph.threads.net/v1.0";
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const {
-      threadsAccessToken,
-      threadsUserId,
-      anthropicApiKey,
-      topic,
-      referenceData,
-    } = body;
+    const { topic, referenceData } = body;
 
-    if (!threadsAccessToken || !threadsUserId || !anthropicApiKey || !topic) {
+    const threadsAccessToken = process.env.THREADS_ACCESS_TOKEN;
+    const threadsUserId = process.env.THREADS_USER_ID;
+
+    if (!threadsAccessToken || !threadsUserId) {
       return NextResponse.json(
-        { error: "すべての項目を入力してください" },
+        { error: "Threads APIがサーバーに設定されていません" },
+        { status: 500 }
+      );
+    }
+
+    if (!topic) {
+      return NextResponse.json(
+        { error: "投稿テーマを入力してください" },
         { status: 400 }
       );
     }
 
     // AIで投稿内容を生成
-    const client = new Anthropic({ apiKey: anthropicApiKey });
+    const client = new Anthropic();
     const message = await client.messages.create({
       model: "claude-sonnet-4-20250514",
       max_tokens: 300,
