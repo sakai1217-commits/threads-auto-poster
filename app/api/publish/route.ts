@@ -8,9 +8,9 @@ export async function POST(request: NextRequest) {
     const userId = Number(request.headers.get("x-user-id"));
     const user = await getUserById(userId);
 
-    if (!user?.threads_access_token || !user?.threads_user_id) {
+    if (!user?.threads_access_token) {
       return NextResponse.json(
-        { error: "設定画面からThreads APIを登録してください" },
+        { error: "設定画面からThreadsアクセストークンを登録してください" },
         { status: 400 }
       );
     }

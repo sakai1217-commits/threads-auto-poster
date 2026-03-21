@@ -16,9 +16,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (!user?.threads_access_token || !user?.threads_user_id) {
+    if (!user?.threads_access_token) {
       return NextResponse.json(
-        { error: "設定画面からThreads APIを登録してください" },
+        { error: "設定画面からThreadsアクセストークンを登録してください" },
         { status: 400 }
       );
     }

@@ -947,18 +947,16 @@ function AnalyticsTab({
     try {
       // 1. Threads APIから実際の投稿を取得（トークンがある場合のみ）
       let postsToAnalyze: PostRecord[] = [];
-      if (hasThreadsToken) try {
-        const sinceParam = analysisPeriod !== "all" ? (() => {
-          const d = new Date(); d.setDate(d.getDate() - Number(analysisPeriod)); return d.toISOString().slice(0, 10);
-        })() : "";
-        const qs = sinceParam ? `?limit=100&since=${sinceParam}` : "?limit=100";
-        const threadsRes = await authFetch(`/api/threads-posts${qs}`, {}, onUnauth);
-        const threadsData = await threadsRes.json();
-        if (threadsRes.ok && threadsData.posts?.length > 0) {
-          postsToAnalyze = threadsData.posts;
+      if (hasThreadsToken) {
+        try {
+          const threadsRes = await authFetch("/api/threads-posts?limit=100", {}, onUnauth);
+          const threadsData = await threadsRes.json();
+          if (threadsRes.ok && threadsData.posts?.length > 0) {
+            postsToAnalyze = threadsData.posts;
+          }
+        } catch {
+          // Threads API failed — continue with fallback
         }
-      } catch {
-        // Threads API failed — continue with file/mock fallback
       }
 
       // 2. Fallback: uploaded files
