@@ -21,9 +21,9 @@ export async function GET(request: NextRequest) {
 
     if (!res.ok) {
       const errText = await res.text();
-      console.error("Threads /me error:", errText);
+      console.error("Threads /me error:", res.status, errText);
       return NextResponse.json(
-        { error: `アクセストークンが無効です。Threads APIの設定を確認してください。(${res.status})` },
+        { error: `アクセストークンが無効です (${res.status}): ${errText}` },
         { status: 400 }
       );
     }
