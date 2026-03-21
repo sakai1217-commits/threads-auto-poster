@@ -745,6 +745,41 @@ function SettingsTab({ onUnauth, onSaved }: { onUnauth: () => void; onSaved: () 
       .catch(() => setLoaded(true));
   }, [onUnauth]);
 
+  const [fetchingUserId, setFetchingUserId] = useState(false);
+
+  const handleFetchUserId = async () => {
+    const token = threadsToken || (status.hasThreadsToken ? "__saved__" : "");
+    if (!token) { setMessage("先にアクセストークンを入力してください"); return; }
+    setFetchingUserId(true); setMessage("");
+    try {
+      // If token is newly entered, save it first
+      if (threadsToken) {
+        await authFetch("/api/settings", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ threadsAccessToken: threadsToken }),
+        }, onUnauth);
+        setThreadsToken("");
+      }
+      const res = await authFetch("/api/threads-me", {}, onUnauth);
+      const data = await res.json();
+      if (!res.ok) { setMessage(data.error || "ユーザーID取得に失敗"); return; }
+      setThreadsUserId(data.userId);
+      // Save the fetched user ID
+      await authFetch("/api/settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ threadsUserId: data.userId }),
+      }, onUnauth);
+      setMessage(`ユーザーID: ${data.userId} を取得・保存しました`);
+      onSaved();
+      const refreshRes = await authFetch("/api/settings", {}, onUnauth);
+      const d = await refreshRes.json();
+      setStatus({ hasAnthropicKey: d.hasAnthropicKey, hasThreadsToken: d.hasThreadsToken, hasThreadsUserId: d.hasThreadsUserId });
+    } catch (e) { setMessage(e instanceof Error ? e.message : "取得に失敗しました"); }
+    finally { setFetchingUserId(false); }
+  };
+
   const handleSave = async () => {
     setSaving(true);
     setMessage("");
@@ -752,8 +787,8 @@ function SettingsTab({ onUnauth, onSaved }: { onUnauth: () => void; onSaved: () 
       const body: Record<string, string> = {};
       if (anthropicKey) body.anthropicApiKey = anthropicKey;
       if (threadsToken) body.threadsAccessToken = threadsToken;
-      if (threadsUserId !== undefined) body.threadsUserId = threadsUserId;
-      if (postTopic !== undefined) body.postTopic = postTopic;
+      if (threadsUserId) body.threadsUserId = threadsUserId;
+      if (postTopic) body.postTopic = postTopic;
 
       await authFetch("/api/settings", {
         method: "PUT",
@@ -815,15 +850,27 @@ function SettingsTab({ onUnauth, onSaved }: { onUnauth: () => void; onSaved: () 
           </label>
           <label style={{ display: "flex", flexDirection: "column", gap: "0.3rem" }}>
             <span style={{ fontSize: "0.8rem", color: "var(--text-secondary)", fontWeight: 500 }}>
-              ユーザーID {status.hasThreadsUserId && <span style={{ color: "#16a34a" }}>(設定済み)</span>}
+              ユーザーID（数字） {status.hasThreadsUserId && <span style={{ color: "#16a34a" }}>(設定済み)</span>}
             </span>
-            <input
-              type="text"
-              value={threadsUserId}
-              onChange={(e) => setThreadsUserId(e.target.value)}
-              placeholder="1234567890"
-              style={inputStyle}
-            />
+            <p style={{ fontSize: "0.72rem", color: "var(--text-muted)", margin: "0 0 0.2rem 0" }}>
+              アカウント名ではなく、Threads APIの数字IDです。アクセストークンを保存後「自動取得」で取得できます。
+            </p>
+            <div style={{ display: "flex", gap: "0.5rem" }}>
+              <input
+                type="text"
+                value={threadsUserId}
+                onChange={(e) => setThreadsUserId(e.target.value)}
+                placeholder="1234567890"
+                style={{ ...inputStyle, flex: 1 }}
+              />
+              <button
+                style={{ ...btnSecondary, whiteSpace: "nowrap", opacity: fetchingUserId ? 0.6 : 1 }}
+                onClick={handleFetchUserId}
+                disabled={fetchingUserId}
+              >
+                {fetchingUserId ? "取得中..." : "自動取得"}
+              </button>
+            </div>
           </label>
         </div>
       </div>

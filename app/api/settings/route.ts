@@ -37,10 +37,10 @@ export async function PUT(request: NextRequest) {
     const { anthropicApiKey, threadsAccessToken, threadsUserId, postTopic } = body;
 
     const updates: Record<string, string> = {};
-    if (anthropicApiKey !== undefined) updates.anthropic_api_key = anthropicApiKey;
-    if (threadsAccessToken !== undefined) updates.threads_access_token = threadsAccessToken;
-    if (threadsUserId !== undefined) updates.threads_user_id = threadsUserId;
-    if (postTopic !== undefined) updates.post_topic = postTopic;
+    if (anthropicApiKey) updates.anthropic_api_key = anthropicApiKey;
+    if (threadsAccessToken) updates.threads_access_token = threadsAccessToken;
+    if (threadsUserId) updates.threads_user_id = threadsUserId;
+    if (postTopic) updates.post_topic = postTopic;
 
     await updateUserKeys(userId, updates);
 
