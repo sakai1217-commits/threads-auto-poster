@@ -637,7 +637,7 @@ export default function Home() {
           <FilesTab files={uploadedFiles} onUpload={handleFileUpload} onRemove={removeFile} />
         )}
         {activeTab === "analytics" && (
-          <AnalyticsTab postTypes={postTypes} setPostTypes={setPostTypes} onNavigate={setActiveTab} isApiConfigured={apiConfigured} onUnauth={handleUnauth} />
+          <AnalyticsTab postTypes={postTypes} setPostTypes={setPostTypes} onNavigate={setActiveTab} isApiConfigured={apiConfigured} onUnauth={handleUnauth} uploadedFiles={uploadedFiles} />
         )}
         {activeTab === "schedule" && (
           <ScheduleTab postTypes={postTypes} scheduleEntries={scheduleEntries} setScheduleEntries={setScheduleEntries} onNavigate={setActiveTab} />
@@ -869,12 +869,13 @@ function SettingsTab({ onUnauth, onSaved }: { onUnauth: () => void; onSaved: () 
 const TYPE_COLORS = ["#7c3aed", "#b8860b", "#059669", "#e11d48", "#2563eb", "#d97706"];
 
 function AnalyticsTab({
-  postTypes, setPostTypes, onNavigate, isApiConfigured, onUnauth,
+  postTypes, setPostTypes, onNavigate, isApiConfigured, onUnauth, uploadedFiles,
 }: {
-  postTypes: PostType[]; setPostTypes: (types: PostType[]) => void; onNavigate: (tab: TabKey) => void; isApiConfigured: boolean; onUnauth: () => void;
+  postTypes: PostType[]; setPostTypes: (types: PostType[]) => void; onNavigate: (tab: TabKey) => void; isApiConfigured: boolean; onUnauth: () => void; uploadedFiles: UploadedFile[];
 }) {
   const [analyzing, setAnalyzing] = useState(false);
   const [error, setError] = useState("");
+  const [analysisPeriod, setAnalysisPeriod] = useState<string>("30");
 
   const weeklyTrend = [
     { day: "月", engagement: 3.1 }, { day: "火", engagement: 2.8 }, { day: "水", engagement: 4.2 },
@@ -887,10 +888,70 @@ function AnalyticsTab({
     setAnalyzing(true);
     setError("");
     try {
+      // Try to parse posts from uploaded files first; fall back to mock data
+      let postsToAnalyze: PostRecord[] = [];
+      if (uploadedFiles.length > 0) {
+        for (const file of uploadedFiles) {
+          try {
+            // Try parsing as JSON array of posts
+            const parsed = JSON.parse(file.content);
+            const arr = Array.isArray(parsed) ? parsed : parsed.posts || parsed.data || [];
+            for (const item of arr) {
+              if (item.text) {
+                postsToAnalyze.push({
+                  text: item.text,
+                  date: item.date || "",
+                  likes: Number(item.likes) || 0,
+                  replies: Number(item.replies) || 0,
+                });
+              }
+            }
+          } catch {
+            // If not JSON, try parsing as CSV/TSV
+            const lines = file.content.split("\n").filter((l) => l.trim());
+            if (lines.length > 1) {
+              const sep = file.name.endsWith(".tsv") ? "\t" : ",";
+              const header = lines[0].toLowerCase();
+              const hasHeader = header.includes("text") || header.includes("投稿");
+              const dataLines = hasHeader ? lines.slice(1) : lines;
+              for (const line of dataLines) {
+                const cols = line.split(sep);
+                if (cols.length >= 1 && cols[0].trim()) {
+                  postsToAnalyze.push({
+                    text: cols[0].trim().replace(/^"|"$/g, ""),
+                    date: cols[1]?.trim().replace(/^"|"$/g, "") || "",
+                    likes: Number(cols[2]?.trim()) || 0,
+                    replies: Number(cols[3]?.trim()) || 0,
+                  });
+                }
+              }
+            } else {
+              // Single text file - treat entire content as one post
+              postsToAnalyze.push({ text: file.content.trim(), date: "", likes: 0, replies: 0 });
+            }
+          }
+        }
+      }
+      if (postsToAnalyze.length === 0) {
+        postsToAnalyze = MOCK_POSTS;
+      }
+      // Filter by analysis period
+      if (analysisPeriod !== "all") {
+        const days = Number(analysisPeriod);
+        const cutoff = new Date();
+        cutoff.setDate(cutoff.getDate() - days);
+        const cutoffStr = cutoff.toISOString().slice(0, 10);
+        postsToAnalyze = postsToAnalyze.filter((p) => !p.date || p.date >= cutoffStr);
+        if (postsToAnalyze.length === 0) {
+          setError(`過去${days}日間の投稿が見つかりませんでした。期間を広げてみてください。`);
+          setAnalyzing(false);
+          return;
+        }
+      }
       const res = await authFetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ posts: MOCK_POSTS }),
+        body: JSON.stringify({ posts: postsToAnalyze }),
       }, onUnauth);
       const data = await res.json();
       if (!res.ok) { setError(data.error); return; }
@@ -904,10 +965,10 @@ function AnalyticsTab({
     <div>
       <h2 style={{ fontSize: "1.4rem", fontWeight: 700, marginBottom: "1.5rem" }}>投稿分析</h2>
       <div style={{ display: "flex", gap: "1rem", marginBottom: "1.5rem" }}>
-        <div style={statBox}><div style={{ fontSize: "1.6rem", fontWeight: 700, color: "var(--purple-700)" }}>{MOCK_POSTS.length}</div><div style={{ fontSize: "0.75rem", color: "var(--text-secondary)", marginTop: "0.2rem" }}>分析対象の投稿</div></div>
+        <div style={statBox}><div style={{ fontSize: "1.6rem", fontWeight: 700, color: "var(--purple-700)" }}>{uploadedFiles.length > 0 ? `${uploadedFiles.length} ファイル` : MOCK_POSTS.length}</div><div style={{ fontSize: "0.75rem", color: "var(--text-secondary)", marginTop: "0.2rem" }}>{uploadedFiles.length > 0 ? "読み込み済みファイル" : "サンプル投稿"}</div></div>
         <div style={statBox}><div style={{ fontSize: "1.6rem", fontWeight: 700, color: "var(--gold-500)" }}>{postTypes.length}</div><div style={{ fontSize: "0.75rem", color: "var(--text-secondary)", marginTop: "0.2rem" }}>検出タイプ数</div></div>
-        <div style={statBox}><div style={{ fontSize: "1.6rem", fontWeight: 700, color: "var(--purple-700)" }}>26</div><div style={{ fontSize: "0.75rem", color: "var(--text-secondary)", marginTop: "0.2rem" }}>平均いいね数</div></div>
-        <div style={statBox}><div style={{ fontSize: "1.6rem", fontWeight: 700, color: "var(--gold-500)" }}>6</div><div style={{ fontSize: "0.75rem", color: "var(--text-secondary)", marginTop: "0.2rem" }}>平均返信数</div></div>
+        <div style={statBox}><div style={{ fontSize: "1.6rem", fontWeight: 700, color: "var(--purple-700)" }}>{postTypes.length > 0 ? Math.round(postTypes.reduce((s, t) => s + t.avgLikes, 0) / postTypes.length) : "—"}</div><div style={{ fontSize: "0.75rem", color: "var(--text-secondary)", marginTop: "0.2rem" }}>平均いいね数</div></div>
+        <div style={statBox}><div style={{ fontSize: "1.6rem", fontWeight: 700, color: "var(--gold-500)" }}>{postTypes.length > 0 ? Math.round(postTypes.reduce((s, t) => s + t.avgReplies, 0) / postTypes.length) : "—"}</div><div style={{ fontSize: "0.75rem", color: "var(--text-secondary)", marginTop: "0.2rem" }}>平均返信数</div></div>
       </div>
 
       <div style={{ ...card, marginBottom: "1.5rem" }}>
@@ -915,7 +976,26 @@ function AnalyticsTab({
         {postTypes.length === 0 ? (
           <div style={{ textAlign: "center", padding: "1.5rem 0" }}>
             <p style={{ fontSize: "0.88rem", marginBottom: "0.5rem" }}>過去の投稿をAIが分析し、投稿タイプ（型）に自動分類します</p>
-            <p style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: "1rem" }}>分類結果をもとにスケジュールを組むことができます</p>
+            <p style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: "1rem" }}>
+              {uploadedFiles.length > 0
+                ? `${uploadedFiles.length}件のファイルを分析します。分類結果をもとにスケジュールを組むことができます`
+                : "ファイル管理タブからデータを読み込むか、サンプルデータで分析できます"}
+            </p>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "0.75rem", marginBottom: "1rem" }}>
+              <label style={{ fontSize: "0.82rem", color: "var(--text-secondary)", fontWeight: 500 }}>分析期間</label>
+              <select
+                value={analysisPeriod}
+                onChange={(e) => setAnalysisPeriod(e.target.value)}
+                style={{ ...inputStyle, width: "auto", minWidth: 160, cursor: "pointer" }}
+              >
+                <option value="7">過去7日間</option>
+                <option value="14">過去14日間</option>
+                <option value="30">過去30日間</option>
+                <option value="60">過去60日間</option>
+                <option value="90">過去90日間</option>
+                <option value="all">すべての期間</option>
+              </select>
+            </div>
             <button style={{ ...btnPrimary, opacity: analyzing ? 0.6 : 1 }} onClick={handleAnalyze} disabled={analyzing}>
               {analyzing ? "分析中..." : "AIで投稿タイプを分析する"}
             </button>
@@ -939,8 +1019,20 @@ function AnalyticsTab({
                 </div>
               ))}
             </div>
-            <div style={{ display: "flex", gap: "0.75rem" }}>
+            <div style={{ display: "flex", gap: "0.75rem", alignItems: "center", flexWrap: "wrap" }}>
               <button style={btnPrimary} onClick={() => onNavigate("schedule")}>この分類でスケジュールを組む</button>
+              <select
+                value={analysisPeriod}
+                onChange={(e) => setAnalysisPeriod(e.target.value)}
+                style={{ ...inputStyle, width: "auto", minWidth: 140, cursor: "pointer", fontSize: "0.8rem", padding: "0.45rem 0.6rem" }}
+              >
+                <option value="7">過去7日間</option>
+                <option value="14">過去14日間</option>
+                <option value="30">過去30日間</option>
+                <option value="60">過去60日間</option>
+                <option value="90">過去90日間</option>
+                <option value="all">すべての期間</option>
+              </select>
               <button style={btnSecondary} onClick={handleAnalyze} disabled={analyzing}>{analyzing ? "再分析中..." : "再分析する"}</button>
             </div>
           </div>
@@ -1130,7 +1222,8 @@ function ReviewTab({
     if (!isApiConfigured) { setError("設定画面からAPIキーを登録してください"); return; }
     if (!topic.trim()) { setError("投稿テーマを入力してください"); return; }
     setGenerating(true); setError("");
-    const fileContents = uploadedFiles.map((f) => `--- ${f.name} ---\n${f.content}`).join("\n\n");
+    const rawContents = uploadedFiles.map((f) => `--- ${f.name} ---\n${f.content}`).join("\n\n");
+    const fileContents = rawContents.length > 10000 ? rawContents.slice(0, 10000) + "\n\n... (以下省略)" : rawContents;
     try {
       const res = await authFetch("/api/generate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ topic, referenceData: fileContents || undefined }) }, onUnauth);
       const data = await res.json();

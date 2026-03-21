@@ -68,7 +68,21 @@ ${posts.map((p: { text: string; date: string; likes: number; replies: number }, 
       throw new Error("AIからの応答が不正です");
     }
 
-    const parsed = JSON.parse(block.text);
+    // Claude may wrap JSON in ```json ... ``` or add extra text
+    let jsonText = block.text.trim();
+    const jsonMatch = jsonText.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (jsonMatch) {
+      jsonText = jsonMatch[1].trim();
+    }
+    // Also try to extract JSON object if there's surrounding text
+    if (!jsonText.startsWith("{")) {
+      const objMatch = jsonText.match(/\{[\s\S]*\}/);
+      if (objMatch) {
+        jsonText = objMatch[0];
+      }
+    }
+
+    const parsed = JSON.parse(jsonText);
     return NextResponse.json({ success: true, analysis: parsed });
   } catch (error) {
     console.error("Analyze failed:", error);
