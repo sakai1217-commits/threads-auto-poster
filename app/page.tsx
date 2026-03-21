@@ -642,7 +642,7 @@ export default function Home() {
         {activeTab === "schedule" && (
           <ScheduleTab postTypes={postTypes} scheduleEntries={scheduleEntries} setScheduleEntries={setScheduleEntries} onNavigate={setActiveTab} />
         )}
-        {activeTab === "recent" && <RecentPostsTab />}
+        {activeTab === "recent" && <RecentPostsTab isApiConfigured={apiConfigured} onUnauth={handleUnauth} />}
         {activeTab === "review" && (
           <ReviewTab drafts={drafts} uploadedFiles={uploadedFiles} onAddDraft={addDraft} onUpdateStatus={updateDraftStatus} isApiConfigured={apiConfigured} onUnauth={handleUnauth} />
         )}
@@ -888,26 +888,34 @@ function AnalyticsTab({
     setAnalyzing(true);
     setError("");
     try {
-      // Try to parse posts from uploaded files first; fall back to mock data
+      // 1. Threads APIから実際の投稿を取得
       let postsToAnalyze: PostRecord[] = [];
-      if (uploadedFiles.length > 0) {
+      try {
+        const sinceParam = analysisPeriod !== "all" ? (() => {
+          const d = new Date(); d.setDate(d.getDate() - Number(analysisPeriod)); return d.toISOString().slice(0, 10);
+        })() : "";
+        const qs = sinceParam ? `?limit=100&since=${sinceParam}` : "?limit=100";
+        const threadsRes = await authFetch(`/api/threads-posts${qs}`, {}, onUnauth);
+        const threadsData = await threadsRes.json();
+        if (threadsRes.ok && threadsData.posts?.length > 0) {
+          postsToAnalyze = threadsData.posts;
+        }
+      } catch {
+        // Threads API failed — continue with file/mock fallback
+      }
+
+      // 2. Fallback: uploaded files
+      if (postsToAnalyze.length === 0 && uploadedFiles.length > 0) {
         for (const file of uploadedFiles) {
           try {
-            // Try parsing as JSON array of posts
             const parsed = JSON.parse(file.content);
             const arr = Array.isArray(parsed) ? parsed : parsed.posts || parsed.data || [];
             for (const item of arr) {
               if (item.text) {
-                postsToAnalyze.push({
-                  text: item.text,
-                  date: item.date || "",
-                  likes: Number(item.likes) || 0,
-                  replies: Number(item.replies) || 0,
-                });
+                postsToAnalyze.push({ text: item.text, date: item.date || "", likes: Number(item.likes) || 0, replies: Number(item.replies) || 0 });
               }
             }
           } catch {
-            // If not JSON, try parsing as CSV/TSV
             const lines = file.content.split("\n").filter((l) => l.trim());
             if (lines.length > 1) {
               const sep = file.name.endsWith(".tsv") ? "\t" : ",";
@@ -917,21 +925,17 @@ function AnalyticsTab({
               for (const line of dataLines) {
                 const cols = line.split(sep);
                 if (cols.length >= 1 && cols[0].trim()) {
-                  postsToAnalyze.push({
-                    text: cols[0].trim().replace(/^"|"$/g, ""),
-                    date: cols[1]?.trim().replace(/^"|"$/g, "") || "",
-                    likes: Number(cols[2]?.trim()) || 0,
-                    replies: Number(cols[3]?.trim()) || 0,
-                  });
+                  postsToAnalyze.push({ text: cols[0].trim().replace(/^"|"$/g, ""), date: cols[1]?.trim().replace(/^"|"$/g, "") || "", likes: Number(cols[2]?.trim()) || 0, replies: Number(cols[3]?.trim()) || 0 });
                 }
               }
             } else {
-              // Single text file - treat entire content as one post
               postsToAnalyze.push({ text: file.content.trim(), date: "", likes: 0, replies: 0 });
             }
           }
         }
       }
+
+      // 3. Final fallback: mock data
       if (postsToAnalyze.length === 0) {
         postsToAnalyze = MOCK_POSTS;
       }
@@ -1187,12 +1191,45 @@ function ScheduleTab({
 // ============================================================
 // Recent Posts Tab
 // ============================================================
-function RecentPostsTab() {
+function RecentPostsTab({ isApiConfigured, onUnauth }: { isApiConfigured: boolean; onUnauth: () => void }) {
+  const [posts, setPosts] = useState<PostRecord[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [fetched, setFetched] = useState(false);
+
+  const fetchPosts = useCallback(async () => {
+    if (!isApiConfigured) { setError("設定画面からThreads APIを登録してください"); return; }
+    setLoading(true); setError("");
+    try {
+      const res = await authFetch("/api/threads-posts?limit=25", {}, onUnauth);
+      const data = await res.json();
+      if (!res.ok) { setError(data.error); return; }
+      setPosts(data.posts);
+      setFetched(true);
+    } catch (e) { setError(e instanceof Error ? e.message : "取得に失敗しました"); }
+    finally { setLoading(false); }
+  }, [isApiConfigured, onUnauth]);
+
+  useEffect(() => { if (isApiConfigured && !fetched) fetchPosts(); }, [isApiConfigured, fetched, fetchPosts]);
+
   return (
     <div>
       <h2 style={{ fontSize: "1.4rem", fontWeight: 700, marginBottom: "1.5rem" }}>最近の投稿</h2>
+      <div style={{ marginBottom: "1rem", display: "flex", gap: "0.75rem", alignItems: "center" }}>
+        <button style={{ ...btnSecondary, opacity: loading ? 0.6 : 1 }} onClick={fetchPosts} disabled={loading}>
+          {loading ? "取得中..." : "Threadsから再取得"}
+        </button>
+        {posts.length > 0 && <span style={{ fontSize: "0.78rem", color: "var(--text-muted)" }}>{posts.length}件の投稿</span>}
+      </div>
+      {error && <div style={{ ...card, marginBottom: "1rem", borderColor: "rgba(220, 38, 38, 0.3)", padding: "1rem" }}><p style={{ fontSize: "0.85rem", color: "#dc2626" }}>{error}</p></div>}
+      {!fetched && !loading && !error && (
+        <div style={{ ...card, textAlign: "center", padding: "3rem 1.5rem" }}>
+          <p style={{ fontSize: "0.9rem", color: "var(--text-muted)", marginBottom: "0.5rem" }}>Threads APIから投稿を取得します</p>
+          <p style={{ fontSize: "0.78rem", color: "var(--text-muted)" }}>設定画面でThreads APIの情報を登録してください</p>
+        </div>
+      )}
       <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
-        {MOCK_POSTS.map((post, i) => (
+        {posts.map((post, i) => (
           <div key={i} style={card}>
             <p style={{ fontSize: "0.9rem", lineHeight: 1.7, marginBottom: "0.75rem", whiteSpace: "pre-wrap" }}>{post.text}</p>
             <div style={{ display: "flex", gap: "1.5rem", fontSize: "0.78rem", color: "var(--text-muted)", borderTop: "1px solid var(--card-border)", paddingTop: "0.6rem" }}>
