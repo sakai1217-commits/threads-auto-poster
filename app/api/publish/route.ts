@@ -27,7 +27,7 @@ export async function POST(request: NextRequest) {
 
     // Step 1 - メディアコンテナ作成
     const createRes = await fetch(
-      `${THREADS_API_BASE}/${user.threads_user_id}/threads`,
+      `${THREADS_API_BASE}/me/threads`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -48,7 +48,7 @@ export async function POST(request: NextRequest) {
 
     // Step 2 - 公開
     const publishRes = await fetch(
-      `${THREADS_API_BASE}/${user.threads_user_id}/threads_publish`,
+      `${THREADS_API_BASE}/me/threads_publish`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },

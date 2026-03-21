@@ -66,7 +66,7 @@ ${referenceData ? `\n参考データ（競合投稿やトレンド情報）:\n${
 
     // Threadsに投稿
     const createRes = await fetch(
-      `${THREADS_API_BASE}/${user.threads_user_id}/threads`,
+      `${THREADS_API_BASE}/me/threads`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -86,7 +86,7 @@ ${referenceData ? `\n参考データ（競合投稿やトレンド情報）:\n${
     const { id: creationId } = await createRes.json();
 
     const publishRes = await fetch(
-      `${THREADS_API_BASE}/${user.threads_user_id}/threads_publish`,
+      `${THREADS_API_BASE}/me/threads_publish`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },

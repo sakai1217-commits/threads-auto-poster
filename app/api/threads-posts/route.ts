@@ -17,29 +17,35 @@ export async function GET(request: NextRequest) {
 
     const { searchParams } = new URL(request.url);
     const limit = Math.min(Number(searchParams.get("limit")) || 25, 100);
-    const since = searchParams.get("since") || ""; // YYYY-MM-DD
+    const since = searchParams.get("since") || "";
 
-    // Threads API: get user's threads with basic fields first
-    // like_count/reply_count may not be available on listing; try with, fallback without
     const baseParams = `limit=${limit}&access_token=${user.threads_access_token}`;
     const sinceParam = since ? `&since=${Math.floor(new Date(since).getTime() / 1000)}` : "";
 
-    let res = await fetch(
-      `${THREADS_API_BASE}/${user.threads_user_id}/threads?fields=id,text,timestamp,like_count,reply_count&${baseParams}${sinceParam}`
-    );
+    // Use /me/threads instead of /{user-id}/threads to avoid permission issues
+    const fieldSets = [
+      "id,text,timestamp,like_count,reply_count",
+      "id,text,timestamp",
+    ];
 
-    // If 400, retry without engagement fields (permissions may not include them)
-    if (res.status === 400) {
+    let res: Response | null = null;
+    let lastErr = "";
+    for (const fields of fieldSets) {
       res = await fetch(
-        `${THREADS_API_BASE}/${user.threads_user_id}/threads?fields=id,text,timestamp&${baseParams}${sinceParam}`
+        `${THREADS_API_BASE}/me/threads?fields=${fields}&${baseParams}${sinceParam}`
       );
+      if (res.ok) break;
+      lastErr = await res.text();
+      console.error("Threads API error:", res.status, lastErr);
     }
 
-    if (!res.ok) {
-      const errText = await res.text();
-      console.error("Threads API error:", res.status, errText);
+    if (!res || !res.ok) {
+      // Check for common permission issues
+      const hint = lastErr.includes("missing permissions") || lastErr.includes("does not support")
+        ? "\n\nアクセストークンに threads_basic スコープが必要です。Meta開発者ポータルでトークンを再生成してください。"
+        : "";
       return NextResponse.json(
-        { error: `Threads APIからの取得に失敗しました: ${res.status} - ${errText}` },
+        { error: `Threads APIからの取得に失敗しました: ${res?.status || "unknown"}${hint}` },
         { status: 502 }
       );
     }

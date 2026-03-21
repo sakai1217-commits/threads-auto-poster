@@ -2,15 +2,14 @@ const THREADS_API_BASE = "https://graph.threads.net/v1.0";
 
 export async function publishToThreads(text: string): Promise<{ id: string }> {
   const accessToken = process.env.THREADS_ACCESS_TOKEN;
-  const userId = process.env.THREADS_USER_ID;
 
-  if (!accessToken || !userId) {
-    throw new Error("THREADS_ACCESS_TOKEN and THREADS_USER_ID are required");
+  if (!accessToken) {
+    throw new Error("THREADS_ACCESS_TOKEN is required");
   }
 
   // Step 1: メディアコンテナを作成
   const createRes = await fetch(
-    `${THREADS_API_BASE}/${userId}/threads`,
+    `${THREADS_API_BASE}/me/threads`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -31,7 +30,7 @@ export async function publishToThreads(text: string): Promise<{ id: string }> {
 
   // Step 2: 公開
   const publishRes = await fetch(
-    `${THREADS_API_BASE}/${userId}/threads_publish`,
+    `${THREADS_API_BASE}/me/threads_publish`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
