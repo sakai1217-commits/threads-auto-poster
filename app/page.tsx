@@ -18,10 +18,13 @@ interface ScheduleItem {
 }
 
 interface PostRecord {
+  id?: string;
   text: string;
   date: string;
   likes: number;
   replies: number;
+  permalink?: string;
+  isReply?: boolean;
 }
 
 interface DraftPost {
@@ -954,12 +957,27 @@ function AnalyticsTab({
   const [analyzing, setAnalyzing] = useState(false);
   const [error, setError] = useState("");
   const [analysisPeriod, setAnalysisPeriod] = useState<string>("30");
+  const [threadsPosts, setThreadsPosts] = useState<PostRecord[]>([]);
+  const [threadsReplies, setThreadsReplies] = useState<PostRecord[]>([]);
+  const [postsLoaded, setPostsLoaded] = useState(false);
 
-  const weeklyTrend = [
-    { day: "月", engagement: 3.1 }, { day: "火", engagement: 2.8 }, { day: "水", engagement: 4.2 },
-    { day: "木", engagement: 3.5 }, { day: "金", engagement: 3.8 }, { day: "土", engagement: 5.1 }, { day: "日", engagement: 4.6 },
-  ];
-  const maxEng = Math.max(...weeklyTrend.map((d) => d.engagement));
+  // Fetch Threads posts + replies on mount
+  useEffect(() => {
+    if (!hasThreadsToken || postsLoaded) return;
+    authFetch("/api/threads-posts?limit=100&replies=1", {}, onUnauth)
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.posts) setThreadsPosts(d.posts);
+        if (d.replies) setThreadsReplies(d.replies);
+        setPostsLoaded(true);
+      })
+      .catch(() => setPostsLoaded(true));
+  }, [hasThreadsToken, postsLoaded, onUnauth]);
+
+  const allPosts = [...threadsPosts, ...threadsReplies];
+  const topPosts = [...allPosts].sort((a, b) => (b.likes + b.replies * 2) - (a.likes + a.replies * 2)).slice(0, 5);
+  const avgLikes = allPosts.length > 0 ? Math.round(allPosts.reduce((s, p) => s + p.likes, 0) / allPosts.length) : 0;
+  const avgReplies = allPosts.length > 0 ? Math.round(allPosts.reduce((s, p) => s + p.replies, 0) / allPosts.length) : 0;
 
   const handleAnalyze = async () => {
     if (!isApiConfigured) { setError("設定画面からAnthropic APIキーを登録してください"); return; }
@@ -1045,10 +1063,10 @@ function AnalyticsTab({
     <div>
       <h2 style={{ fontSize: "1.4rem", fontWeight: 700, marginBottom: "1.5rem" }}>投稿分析</h2>
       <div style={{ display: "flex", gap: "1rem", marginBottom: "1.5rem" }}>
-        <div style={statBox}><div style={{ fontSize: "1.6rem", fontWeight: 700, color: "var(--purple-700)" }}>{uploadedFiles.length > 0 ? `${uploadedFiles.length} ファイル` : MOCK_POSTS.length}</div><div style={{ fontSize: "0.75rem", color: "var(--text-secondary)", marginTop: "0.2rem" }}>{uploadedFiles.length > 0 ? "読み込み済みファイル" : "サンプル投稿"}</div></div>
-        <div style={statBox}><div style={{ fontSize: "1.6rem", fontWeight: 700, color: "var(--gold-500)" }}>{postTypes.length}</div><div style={{ fontSize: "0.75rem", color: "var(--text-secondary)", marginTop: "0.2rem" }}>検出タイプ数</div></div>
-        <div style={statBox}><div style={{ fontSize: "1.6rem", fontWeight: 700, color: "var(--purple-700)" }}>{postTypes.length > 0 ? Math.round(postTypes.reduce((s, t) => s + t.avgLikes, 0) / postTypes.length) : "—"}</div><div style={{ fontSize: "0.75rem", color: "var(--text-secondary)", marginTop: "0.2rem" }}>平均いいね数</div></div>
-        <div style={statBox}><div style={{ fontSize: "1.6rem", fontWeight: 700, color: "var(--gold-500)" }}>{postTypes.length > 0 ? Math.round(postTypes.reduce((s, t) => s + t.avgReplies, 0) / postTypes.length) : "—"}</div><div style={{ fontSize: "0.75rem", color: "var(--text-secondary)", marginTop: "0.2rem" }}>平均返信数</div></div>
+        <div style={statBox}><div style={{ fontSize: "1.6rem", fontWeight: 700, color: "var(--purple-700)" }}>{threadsPosts.length || "—"}</div><div style={{ fontSize: "0.75rem", color: "var(--text-secondary)", marginTop: "0.2rem" }}>投稿数</div></div>
+        <div style={statBox}><div style={{ fontSize: "1.6rem", fontWeight: 700, color: "var(--gold-500)" }}>{threadsReplies.length || "—"}</div><div style={{ fontSize: "0.75rem", color: "var(--text-secondary)", marginTop: "0.2rem" }}>リプライ数</div></div>
+        <div style={statBox}><div style={{ fontSize: "1.6rem", fontWeight: 700, color: "var(--purple-700)" }}>{avgLikes || "—"}</div><div style={{ fontSize: "0.75rem", color: "var(--text-secondary)", marginTop: "0.2rem" }}>平均いいね</div></div>
+        <div style={statBox}><div style={{ fontSize: "1.6rem", fontWeight: 700, color: "var(--gold-500)" }}>{avgReplies || "—"}</div><div style={{ fontSize: "0.75rem", color: "var(--text-secondary)", marginTop: "0.2rem" }}>平均返信</div></div>
       </div>
 
       <div style={{ ...card, marginBottom: "1.5rem" }}>
@@ -1119,32 +1137,71 @@ function AnalyticsTab({
         )}
       </div>
 
-      <div style={{ ...card, marginBottom: "1.5rem" }}>
-        <div style={sectionTitle}>週間エンゲージメント推移</div>
-        <div style={{ display: "flex", alignItems: "flex-end", gap: "0.75rem", height: 140, padding: "0 0.5rem" }}>
-          {weeklyTrend.map((d) => (
-            <div key={d.day} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: "0.3rem" }}>
-              <div style={{ fontSize: "0.72rem", color: "var(--text-muted)", fontWeight: 500 }}>{d.engagement}%</div>
-              <div style={{ width: "100%", height: `${(d.engagement / maxEng) * 90}px`, borderRadius: "6px 6px 2px 2px", background: "linear-gradient(to top, var(--purple-700), var(--purple-400))", minHeight: 8 }} />
-              <div style={{ fontSize: "0.72rem", color: "var(--text-secondary)", fontWeight: 500 }}>{d.day}</div>
+      {allPosts.length > 0 && (() => {
+        const days = ["日", "月", "火", "水", "木", "金", "土"];
+        const dayCounts = days.map((_, di) => {
+          const dayPosts = allPosts.filter((p) => p.date && new Date(p.date).getDay() === di);
+          return { day: days[di], avg: dayPosts.length > 0 ? Math.round(dayPosts.reduce((s, p) => s + p.likes + p.replies, 0) / dayPosts.length) : 0 };
+        });
+        const maxVal = Math.max(...dayCounts.map((d) => d.avg), 1);
+        return (
+          <div style={{ ...card, marginBottom: "1.5rem" }}>
+            <div style={sectionTitle}>曜日別エンゲージメント（いいね+返信の平均）</div>
+            <div style={{ display: "flex", alignItems: "flex-end", gap: "0.75rem", height: 140, padding: "0 0.5rem" }}>
+              {dayCounts.map((d) => (
+                <div key={d.day} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: "0.3rem" }}>
+                  <div style={{ fontSize: "0.72rem", color: "var(--text-muted)", fontWeight: 500 }}>{d.avg}</div>
+                  <div style={{ width: "100%", height: `${(d.avg / maxVal) * 90}px`, borderRadius: "6px 6px 2px 2px", background: "linear-gradient(to top, var(--purple-700), var(--purple-400))", minHeight: 4 }} />
+                  <div style={{ fontSize: "0.72rem", color: "var(--text-secondary)", fontWeight: 500 }}>{d.day}</div>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
+          </div>
+        );
+      })()}
+
+      <div style={{ ...card, marginBottom: "1.5rem" }}>
+        <div style={sectionTitle}>反応が良かった投稿</div>
+        {topPosts.length > 0 ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+            {topPosts.map((post, i) => (
+              <div key={post.id || i} style={{ padding: "0.75rem", borderRadius: 10, background: "rgba(107, 33, 168, 0.03)", borderLeft: i === 0 ? "3px solid var(--gold-500)" : "3px solid var(--purple-400)" }}>
+                {post.isReply && <span style={{ fontSize: "0.65rem", fontWeight: 600, padding: "0.1rem 0.4rem", borderRadius: 10, background: "rgba(37, 99, 235, 0.1)", color: "#2563eb", marginBottom: "0.3rem", display: "inline-block" }}>リプライ</span>}
+                <p style={{ fontSize: "0.82rem", lineHeight: 1.5, marginBottom: "0.4rem" }}>{post.text}</p>
+                <div style={{ display: "flex", gap: "1rem", fontSize: "0.72rem", color: "var(--text-muted)", flexWrap: "wrap" }}>
+                  <span>{post.date}</span>
+                  <span>{post.likes} いいね</span>
+                  <span>{post.replies} 返信</span>
+                  {post.permalink && <a href={post.permalink} target="_blank" rel="noopener noreferrer" style={{ color: "var(--purple-500)", textDecoration: "none" }}>Threadsで見る</a>}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p style={{ fontSize: "0.85rem", color: "var(--text-muted)", textAlign: "center", padding: "1.5rem 0" }}>
+            {hasThreadsToken ? "読み込み中..." : "Threadsアクセストークンを設定すると投稿データが表示されます"}
+          </p>
+        )}
       </div>
 
-      <div style={card}>
-        <div style={sectionTitle}>反応が良かった投稿</div>
-        <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
-          {[...MOCK_POSTS].sort((a, b) => b.likes - a.likes).slice(0, 3).map((post, i) => (
-            <div key={i} style={{ padding: "0.75rem", borderRadius: 10, background: "rgba(107, 33, 168, 0.03)", borderLeft: i === 0 ? "3px solid var(--gold-500)" : "3px solid var(--purple-400)" }}>
-              <p style={{ fontSize: "0.82rem", lineHeight: 1.5, marginBottom: "0.4rem" }}>{post.text}</p>
-              <div style={{ display: "flex", gap: "1rem", fontSize: "0.72rem", color: "var(--text-muted)" }}>
-                <span>{post.date}</span><span>{post.likes} いいね</span><span>{post.replies} 返信</span>
+      {threadsReplies.length > 0 && (
+        <div style={card}>
+          <div style={sectionTitle}>リプライ（会話スレッド） <span style={{ background: "rgba(37, 99, 235, 0.12)", color: "#2563eb", fontSize: "0.7rem", padding: "0.1rem 0.5rem", borderRadius: 20 }}>{threadsReplies.length}件</span></div>
+          <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+            {threadsReplies.slice(0, 10).map((post, i) => (
+              <div key={post.id || i} style={{ padding: "0.75rem", borderRadius: 10, background: "rgba(37, 99, 235, 0.03)", borderLeft: "3px solid #2563eb" }}>
+                <p style={{ fontSize: "0.82rem", lineHeight: 1.5, marginBottom: "0.4rem" }}>{post.text}</p>
+                <div style={{ display: "flex", gap: "1rem", fontSize: "0.72rem", color: "var(--text-muted)", flexWrap: "wrap" }}>
+                  <span>{post.date}</span>
+                  <span>{post.likes} いいね</span>
+                  <span>{post.replies} 返信</span>
+                  {post.permalink && <a href={post.permalink} target="_blank" rel="noopener noreferrer" style={{ color: "#2563eb", textDecoration: "none" }}>Threadsで見る</a>}
+                </div>
               </div>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }
@@ -1269,18 +1326,21 @@ function ScheduleTab({
 // ============================================================
 function RecentPostsTab({ isApiConfigured, onUnauth }: { isApiConfigured: boolean; onUnauth: () => void }) {
   const [posts, setPosts] = useState<PostRecord[]>([]);
+  const [replies, setReplies] = useState<PostRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [fetched, setFetched] = useState(false);
+  const [showTab, setShowTab] = useState<"all" | "posts" | "replies">("all");
 
   const fetchPosts = useCallback(async () => {
-    if (!isApiConfigured) { setError("設定画面からThreads APIを登録してください"); return; }
+    if (!isApiConfigured) { setError("設定画面からThreadsアクセストークンを登録してください"); return; }
     setLoading(true); setError("");
     try {
-      const res = await authFetch("/api/threads-posts?limit=25", {}, onUnauth);
+      const res = await authFetch("/api/threads-posts?limit=50&replies=1", {}, onUnauth);
       const data = await res.json();
       if (!res.ok) { setError(data.error); return; }
-      setPosts(data.posts);
+      setPosts(data.posts || []);
+      setReplies(data.replies || []);
       setFetched(true);
     } catch (e) { setError(e instanceof Error ? e.message : "取得に失敗しました"); }
     finally { setLoading(false); }
@@ -1288,28 +1348,40 @@ function RecentPostsTab({ isApiConfigured, onUnauth }: { isApiConfigured: boolea
 
   useEffect(() => { if (isApiConfigured && !fetched) fetchPosts(); }, [isApiConfigured, fetched, fetchPosts]);
 
+  const displayPosts = showTab === "posts" ? posts : showTab === "replies" ? replies : [...posts, ...replies].sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+
   return (
     <div>
       <h2 style={{ fontSize: "1.4rem", fontWeight: 700, marginBottom: "1.5rem" }}>最近の投稿</h2>
-      <div style={{ marginBottom: "1rem", display: "flex", gap: "0.75rem", alignItems: "center" }}>
+      <div style={{ marginBottom: "1rem", display: "flex", gap: "0.75rem", alignItems: "center", flexWrap: "wrap" }}>
         <button style={{ ...btnSecondary, opacity: loading ? 0.6 : 1 }} onClick={fetchPosts} disabled={loading}>
           {loading ? "取得中..." : "Threadsから再取得"}
         </button>
-        {posts.length > 0 && <span style={{ fontSize: "0.78rem", color: "var(--text-muted)" }}>{posts.length}件の投稿</span>}
+        <div style={{ display: "flex", gap: "0.25rem", background: "rgba(107, 33, 168, 0.06)", borderRadius: 8, padding: "0.2rem" }}>
+          {([["all", `すべて (${posts.length + replies.length})`], ["posts", `投稿 (${posts.length})`], ["replies", `リプライ (${replies.length})`]] as const).map(([key, label]) => (
+            <button key={key} onClick={() => setShowTab(key)} style={{ padding: "0.35rem 0.65rem", fontSize: "0.75rem", fontWeight: showTab === key ? 600 : 400, borderRadius: 6, border: "none", cursor: "pointer", background: showTab === key ? "var(--purple-700)" : "transparent", color: showTab === key ? "#fff" : "var(--text-secondary)", fontFamily: "inherit" }}>
+              {label}
+            </button>
+          ))}
+        </div>
       </div>
       {error && <div style={{ ...card, marginBottom: "1rem", borderColor: "rgba(220, 38, 38, 0.3)", padding: "1rem" }}><p style={{ fontSize: "0.85rem", color: "#dc2626" }}>{error}</p></div>}
       {!fetched && !loading && !error && (
         <div style={{ ...card, textAlign: "center", padding: "3rem 1.5rem" }}>
           <p style={{ fontSize: "0.9rem", color: "var(--text-muted)", marginBottom: "0.5rem" }}>Threads APIから投稿を取得します</p>
-          <p style={{ fontSize: "0.78rem", color: "var(--text-muted)" }}>設定画面でThreads APIの情報を登録してください</p>
+          <p style={{ fontSize: "0.78rem", color: "var(--text-muted)" }}>設定画面でThreadsアクセストークンを登録してください</p>
         </div>
       )}
       <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
-        {posts.map((post, i) => (
-          <div key={i} style={card}>
+        {displayPosts.map((post, i) => (
+          <div key={post.id || i} style={{ ...card, borderLeft: post.isReply ? "3px solid #2563eb" : undefined }}>
+            {post.isReply && <span style={{ fontSize: "0.65rem", fontWeight: 600, padding: "0.1rem 0.4rem", borderRadius: 10, background: "rgba(37, 99, 235, 0.1)", color: "#2563eb", marginBottom: "0.4rem", display: "inline-block" }}>リプライ</span>}
             <p style={{ fontSize: "0.9rem", lineHeight: 1.7, marginBottom: "0.75rem", whiteSpace: "pre-wrap" }}>{post.text}</p>
-            <div style={{ display: "flex", gap: "1.5rem", fontSize: "0.78rem", color: "var(--text-muted)", borderTop: "1px solid var(--card-border)", paddingTop: "0.6rem" }}>
-              <span>{post.date}</span><span>{post.likes} いいね</span><span>{post.replies} 返信</span>
+            <div style={{ display: "flex", gap: "1.5rem", fontSize: "0.78rem", color: "var(--text-muted)", borderTop: "1px solid var(--card-border)", paddingTop: "0.6rem", flexWrap: "wrap" }}>
+              <span>{post.date}</span>
+              <span>{post.likes} いいね</span>
+              <span>{post.replies} 返信</span>
+              {post.permalink && <a href={post.permalink} target="_blank" rel="noopener noreferrer" style={{ color: "var(--purple-500)", textDecoration: "none" }}>Threadsで見る</a>}
             </div>
           </div>
         ))}
