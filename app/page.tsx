@@ -641,7 +641,7 @@ export default function Home() {
       {/* Main Content */}
       <main style={{ flex: 1, padding: "2rem", overflowY: "auto", maxHeight: "100vh" }}>
         {activeTab === "dashboard" && (
-          <DashboardTab drafts={drafts} isApiConfigured={apiConfigured} onNavigate={setActiveTab} />
+          <DashboardTab drafts={drafts} scheduleEntries={scheduleEntries} isApiConfigured={apiConfigured} hasThreadsToken={hasThreadsToken} onNavigate={setActiveTab} onUnauth={handleUnauth} />
         )}
         {activeTab === "files" && (
           <FilesTab files={uploadedFiles} onUpload={handleFileUpload} onRemove={removeFile} />
@@ -668,28 +668,40 @@ export default function Home() {
 // Dashboard Tab
 // ============================================================
 function DashboardTab({
-  drafts, isApiConfigured, onNavigate,
+  drafts, scheduleEntries, isApiConfigured, hasThreadsToken, onNavigate, onUnauth,
 }: {
-  drafts: DraftPost[]; isApiConfigured: boolean; onNavigate: (tab: TabKey) => void;
+  drafts: DraftPost[]; scheduleEntries: ScheduleEntry[]; isApiConfigured: boolean; hasThreadsToken: boolean; onNavigate: (tab: TabKey) => void; onUnauth: () => void;
 }) {
   const pendingCount = drafts.filter((d) => d.status === "pending").length;
   const publishedCount = drafts.filter((d) => d.status === "published").length;
+  const [threadsPosts, setThreadsPosts] = useState<PostRecord[]>([]);
+
+  useEffect(() => {
+    if (!hasThreadsToken) return;
+    authFetch("/api/threads-posts?limit=10", {}, onUnauth)
+      .then((r) => r.json())
+      .then((d) => { if (d.posts) setThreadsPosts(d.posts); })
+      .catch(() => {});
+  }, [hasThreadsToken, onUnauth]);
+
+  const totalPosts = threadsPosts.length > 0 ? threadsPosts.length : publishedCount;
+  const avgLikes = threadsPosts.length > 0 ? Math.round(threadsPosts.reduce((s, p) => s + p.likes, 0) / threadsPosts.length) : 0;
 
   return (
     <div>
       <h2 style={{ fontSize: "1.4rem", fontWeight: 700, marginBottom: "1.5rem" }}>ダッシュボード</h2>
       <div style={{ display: "flex", gap: "1rem", marginBottom: "1.5rem" }}>
         <div style={statBox}>
-          <div style={{ fontSize: "1.6rem", fontWeight: 700, color: "var(--purple-700)" }}>{MOCK_POSTS.length + publishedCount}</div>
-          <div style={{ fontSize: "0.75rem", color: "var(--text-secondary)", marginTop: "0.2rem" }}>総投稿数</div>
+          <div style={{ fontSize: "1.6rem", fontWeight: 700, color: "var(--purple-700)" }}>{totalPosts}</div>
+          <div style={{ fontSize: "0.75rem", color: "var(--text-secondary)", marginTop: "0.2rem" }}>{threadsPosts.length > 0 ? "最近の投稿" : "公開済み"}</div>
         </div>
         <div style={statBox}>
-          <div style={{ fontSize: "1.6rem", fontWeight: 700, color: "var(--gold-500)" }}>3.2%</div>
-          <div style={{ fontSize: "0.75rem", color: "var(--text-secondary)", marginTop: "0.2rem" }}>平均エンゲージメント</div>
+          <div style={{ fontSize: "1.6rem", fontWeight: 700, color: "var(--gold-500)" }}>{avgLikes > 0 ? avgLikes : "—"}</div>
+          <div style={{ fontSize: "0.75rem", color: "var(--text-secondary)", marginTop: "0.2rem" }}>平均いいね</div>
         </div>
         <div style={statBox}>
-          <div style={{ fontSize: "1.6rem", fontWeight: 700, color: "var(--purple-700)" }}>{MOCK_SCHEDULE.filter((s) => s.status === "scheduled").length}</div>
-          <div style={{ fontSize: "0.75rem", color: "var(--text-secondary)", marginTop: "0.2rem" }}>予約投稿</div>
+          <div style={{ fontSize: "1.6rem", fontWeight: 700, color: "var(--purple-700)" }}>{scheduleEntries.length}</div>
+          <div style={{ fontSize: "0.75rem", color: "var(--text-secondary)", marginTop: "0.2rem" }}>スケジュール</div>
         </div>
         <div style={statBox}>
           <div style={{ fontSize: "1.6rem", fontWeight: 700, color: pendingCount > 0 ? "#ef4444" : "var(--gold-500)" }}>{pendingCount}</div>
@@ -720,12 +732,21 @@ function DashboardTab({
           </div>
         </div>
       )}
-      <div style={card}>
-        <div style={sectionTitle}>直近のスケジュール</div>
-        <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
-          {MOCK_SCHEDULE.slice(0, 3).map((item) => (<ScheduleRow key={item.id} item={item} />))}
+      {threadsPosts.length > 0 && (
+        <div style={card}>
+          <div style={sectionTitle}>最近の投稿</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+            {threadsPosts.slice(0, 3).map((post, i) => (
+              <div key={i} style={{ padding: "0.65rem 0.75rem", borderRadius: 10, background: "rgba(107, 33, 168, 0.04)" }}>
+                <p style={{ fontSize: "0.82rem", lineHeight: 1.5, marginBottom: "0.3rem", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{post.text}</p>
+                <div style={{ display: "flex", gap: "1rem", fontSize: "0.7rem", color: "var(--text-muted)" }}>
+                  <span>{post.date}</span><span>{post.likes} いいね</span><span>{post.replies} 返信</span>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }

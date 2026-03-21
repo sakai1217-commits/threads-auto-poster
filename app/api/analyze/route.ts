@@ -2,6 +2,44 @@ import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { getUserById } from "@/lib/db";
 
+function tryParseJSON(text: string): unknown {
+  // 1. Try direct parse
+  try { return JSON.parse(text); } catch {}
+
+  // 2. Extract from ```json ... ```
+  const fenceMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (fenceMatch) {
+    try { return JSON.parse(fenceMatch[1].trim()); } catch {}
+  }
+
+  // 3. Extract JSON object
+  const objMatch = text.match(/\{[\s\S]*\}/);
+  if (objMatch) {
+    try { return JSON.parse(objMatch[0]); } catch {}
+
+    // 4. Try to fix truncated JSON by closing brackets
+    let candidate = objMatch[0];
+    // Count open/close braces and brackets
+    const openBraces = (candidate.match(/\{/g) || []).length;
+    const closeBraces = (candidate.match(/\}/g) || []).length;
+    const openBrackets = (candidate.match(/\[/g) || []).length;
+    const closeBrackets = (candidate.match(/\]/g) || []).length;
+
+    // Remove trailing comma or incomplete value
+    candidate = candidate.replace(/,\s*$/, "");
+    // Remove incomplete last object/entry
+    candidate = candidate.replace(/,\s*\{[^}]*$/, "");
+
+    // Close missing brackets/braces
+    for (let i = 0; i < openBrackets - closeBrackets; i++) candidate += "]";
+    for (let i = 0; i < openBraces - closeBraces; i++) candidate += "}";
+
+    try { return JSON.parse(candidate); } catch {}
+  }
+
+  return null;
+}
+
 export async function POST(request: NextRequest) {
   try {
     const userId = Number(request.headers.get("x-user-id"));
@@ -15,7 +53,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { posts } = body;
+    let { posts } = body;
 
     if (!posts || posts.length === 0) {
       return NextResponse.json(
@@ -24,41 +62,30 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Limit posts to avoid token overflow
+    if (posts.length > 50) {
+      posts = posts.slice(0, 50);
+    }
+
     const client = new Anthropic({ apiKey: user.anthropic_api_key });
     const message = await client.messages.create({
       model: "claude-sonnet-4-20250514",
-      max_tokens: 1000,
+      max_tokens: 2048,
       messages: [
         {
           role: "user",
-          content: `以下はThreadsの占い・スピリチュアル系アカウントの過去投稿です。
-これらの投稿を分析して「投稿タイプ（型）」に分類してください。
+          content: `以下はThreadsアカウントの過去投稿${posts.length}件です。投稿タイプに分類してください。
 
 投稿一覧:
 ${posts.map((p: { text: string; date: string; likes: number; replies: number }, i: number) => `[${i + 1}] ${p.date} (${p.likes}いいね/${p.replies}返信)\n${p.text}`).join("\n\n")}
 
-以下のJSON形式で出力してください。他のテキストは一切含めないでください:
-{
-  "types": [
-    {
-      "id": "type_1",
-      "name": "タイプ名（例: 星座占い）",
-      "description": "このタイプの特徴を1文で",
-      "postIndices": [1, 3],
-      "avgLikes": 25,
-      "avgReplies": 5,
-      "recommendedFrequency": "毎日",
-      "bestTime": "09:00"
-    }
-  ]
-}
+純粋なJSONのみ出力。説明文やコードフェンスは不要:
+{"types":[{"id":"type_1","name":"タイプ名","description":"特徴","postIndices":[1,3],"avgLikes":25,"avgReplies":5,"recommendedFrequency":"毎日","bestTime":"09:00"}]}
 
 ルール:
 - 3〜6タイプに分類
 - 各タイプに最低1つの投稿を割り当て
-- 反応数(いいね・返信)の傾向も考慮
-- recommendedFrequencyは「毎日」「週3回」「週2回」「週1回」のいずれか
-- bestTimeは投稿に最適な時間帯`,
+- recommendedFrequencyは「毎日」「週3回」「週2回」「週1回」のいずれか`,
         },
       ],
     });
@@ -68,21 +95,12 @@ ${posts.map((p: { text: string; date: string; likes: number; replies: number }, 
       throw new Error("AIからの応答が不正です");
     }
 
-    // Claude may wrap JSON in ```json ... ``` or add extra text
-    let jsonText = block.text.trim();
-    const jsonMatch = jsonText.match(/```(?:json)?\s*([\s\S]*?)```/);
-    if (jsonMatch) {
-      jsonText = jsonMatch[1].trim();
-    }
-    // Also try to extract JSON object if there's surrounding text
-    if (!jsonText.startsWith("{")) {
-      const objMatch = jsonText.match(/\{[\s\S]*\}/);
-      if (objMatch) {
-        jsonText = objMatch[0];
-      }
+    const parsed = tryParseJSON(block.text.trim());
+    if (!parsed || typeof parsed !== "object") {
+      console.error("Failed to parse AI response:", block.text.slice(0, 500));
+      throw new Error("AIの応答をJSONとして解析できませんでした。再度お試しください。");
     }
 
-    const parsed = JSON.parse(jsonText);
     return NextResponse.json({ success: true, analysis: parsed });
   } catch (error) {
     console.error("Analyze failed:", error);
