@@ -418,6 +418,8 @@ export default function Home() {
   const [authChecked, setAuthChecked] = useState(false);
   const [authenticated, setAuthenticated] = useState(false);
   const [apiConfigured, setApiConfigured] = useState(false);
+  const [hasAnthropicKey, setHasAnthropicKey] = useState(false);
+  const [hasThreadsToken, setHasThreadsToken] = useState(false);
   const [userEmail, setUserEmail] = useState("");
 
   const [activeTab, setActiveTab] = useState<TabKey>("dashboard");
@@ -436,6 +438,8 @@ export default function Home() {
       .then((d) => {
         setAuthenticated(d.authenticated);
         setApiConfigured(d.apiConfigured);
+        setHasAnthropicKey(d.hasAnthropicKey || false);
+        setHasThreadsToken(d.hasThreadsToken || false);
         setUserEmail(d.email || "");
         setAuthChecked(true);
       })
@@ -479,7 +483,11 @@ export default function Home() {
   const refreshApiConfig = () => {
     fetch("/api/auth/check")
       .then((r) => r.json())
-      .then((d) => setApiConfigured(d.apiConfigured))
+      .then((d) => {
+        setApiConfigured(d.apiConfigured);
+        setHasAnthropicKey(d.hasAnthropicKey || false);
+        setHasThreadsToken(d.hasThreadsToken || false);
+      })
       .catch(() => {});
   };
 
@@ -508,6 +516,8 @@ export default function Home() {
         .then((r) => r.json())
         .then((d) => {
           setApiConfigured(d.apiConfigured);
+          setHasAnthropicKey(d.hasAnthropicKey || false);
+          setHasThreadsToken(d.hasThreadsToken || false);
           setUserEmail(d.email || "");
         })
         .catch(() => {});
@@ -637,14 +647,14 @@ export default function Home() {
           <FilesTab files={uploadedFiles} onUpload={handleFileUpload} onRemove={removeFile} />
         )}
         {activeTab === "analytics" && (
-          <AnalyticsTab postTypes={postTypes} setPostTypes={setPostTypes} onNavigate={setActiveTab} isApiConfigured={apiConfigured} onUnauth={handleUnauth} uploadedFiles={uploadedFiles} />
+          <AnalyticsTab postTypes={postTypes} setPostTypes={setPostTypes} onNavigate={setActiveTab} isApiConfigured={hasAnthropicKey} hasThreadsToken={hasThreadsToken} onUnauth={handleUnauth} uploadedFiles={uploadedFiles} />
         )}
         {activeTab === "schedule" && (
           <ScheduleTab postTypes={postTypes} scheduleEntries={scheduleEntries} setScheduleEntries={setScheduleEntries} onNavigate={setActiveTab} />
         )}
-        {activeTab === "recent" && <RecentPostsTab isApiConfigured={apiConfigured} onUnauth={handleUnauth} />}
+        {activeTab === "recent" && <RecentPostsTab isApiConfigured={hasThreadsToken} onUnauth={handleUnauth} />}
         {activeTab === "review" && (
-          <ReviewTab drafts={drafts} uploadedFiles={uploadedFiles} onAddDraft={addDraft} onUpdateStatus={updateDraftStatus} isApiConfigured={apiConfigured} onUnauth={handleUnauth} />
+          <ReviewTab drafts={drafts} uploadedFiles={uploadedFiles} onAddDraft={addDraft} onUpdateStatus={updateDraftStatus} isApiConfigured={hasAnthropicKey} hasThreadsToken={hasThreadsToken} onUnauth={handleUnauth} />
         )}
         {activeTab === "settings" && (
           <SettingsTab onUnauth={handleUnauth} onSaved={refreshApiConfig} />
@@ -916,9 +926,9 @@ function SettingsTab({ onUnauth, onSaved }: { onUnauth: () => void; onSaved: () 
 const TYPE_COLORS = ["#7c3aed", "#b8860b", "#059669", "#e11d48", "#2563eb", "#d97706"];
 
 function AnalyticsTab({
-  postTypes, setPostTypes, onNavigate, isApiConfigured, onUnauth, uploadedFiles,
+  postTypes, setPostTypes, onNavigate, isApiConfigured, hasThreadsToken, onUnauth, uploadedFiles,
 }: {
-  postTypes: PostType[]; setPostTypes: (types: PostType[]) => void; onNavigate: (tab: TabKey) => void; isApiConfigured: boolean; onUnauth: () => void; uploadedFiles: UploadedFile[];
+  postTypes: PostType[]; setPostTypes: (types: PostType[]) => void; onNavigate: (tab: TabKey) => void; isApiConfigured: boolean; hasThreadsToken: boolean; onUnauth: () => void; uploadedFiles: UploadedFile[];
 }) {
   const [analyzing, setAnalyzing] = useState(false);
   const [error, setError] = useState("");
@@ -931,13 +941,13 @@ function AnalyticsTab({
   const maxEng = Math.max(...weeklyTrend.map((d) => d.engagement));
 
   const handleAnalyze = async () => {
-    if (!isApiConfigured) { setError("設定画面からAPIキーを登録してください"); return; }
+    if (!isApiConfigured) { setError("設定画面からAnthropic APIキーを登録してください"); return; }
     setAnalyzing(true);
     setError("");
     try {
-      // 1. Threads APIから実際の投稿を取得
+      // 1. Threads APIから実際の投稿を取得（トークンがある場合のみ）
       let postsToAnalyze: PostRecord[] = [];
-      try {
+      if (hasThreadsToken) try {
         const sinceParam = analysisPeriod !== "all" ? (() => {
           const d = new Date(); d.setDate(d.getDate() - Number(analysisPeriod)); return d.toISOString().slice(0, 10);
         })() : "";
@@ -1293,9 +1303,9 @@ function RecentPostsTab({ isApiConfigured, onUnauth }: { isApiConfigured: boolea
 // Review Tab
 // ============================================================
 function ReviewTab({
-  drafts, uploadedFiles, onAddDraft, onUpdateStatus, isApiConfigured, onUnauth,
+  drafts, uploadedFiles, onAddDraft, onUpdateStatus, isApiConfigured, hasThreadsToken, onUnauth,
 }: {
-  drafts: DraftPost[]; uploadedFiles: UploadedFile[]; onAddDraft: (draft: DraftPost) => void; onUpdateStatus: (id: string, status: DraftPost["status"]) => void; isApiConfigured: boolean; onUnauth: () => void;
+  drafts: DraftPost[]; uploadedFiles: UploadedFile[]; onAddDraft: (draft: DraftPost) => void; onUpdateStatus: (id: string, status: DraftPost["status"]) => void; isApiConfigured: boolean; hasThreadsToken: boolean; onUnauth: () => void;
 }) {
   const [topic, setTopic] = useState("");
   const [generating, setGenerating] = useState(false);
@@ -1303,7 +1313,7 @@ function ReviewTab({
   const [error, setError] = useState("");
 
   const handleGenerate = async () => {
-    if (!isApiConfigured) { setError("設定画面からAPIキーを登録してください"); return; }
+    if (!isApiConfigured) { setError("設定画面からAnthropic APIキーを登録してください"); return; }
     if (!topic.trim()) { setError("投稿テーマを入力してください"); return; }
     setGenerating(true); setError("");
     const rawContents = uploadedFiles.map((f) => `--- ${f.name} ---\n${f.content}`).join("\n\n");
@@ -1319,7 +1329,7 @@ function ReviewTab({
   };
 
   const handlePublish = async (draft: DraftPost) => {
-    if (!isApiConfigured) { setError("設定画面からAPIキーを登録してください"); return; }
+    if (!hasThreadsToken) { setError("設定画面からThreadsアクセストークンを登録してください"); return; }
     setPublishing(draft.id); setError("");
     try {
       const res = await authFetch("/api/publish", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: draft.text }) }, onUnauth);
@@ -1360,12 +1370,12 @@ function ReviewTab({
                 <div style={{ fontSize: "0.72rem", color: "var(--text-muted)", marginBottom: "0.5rem" }}>テーマ: {draft.topic} ・ {new Date(draft.createdAt).toLocaleString("ja-JP")}</div>
                 <p style={{ fontSize: "0.88rem", lineHeight: 1.7, whiteSpace: "pre-wrap", marginBottom: "0.75rem", padding: "0.75rem", background: "rgba(255, 255, 255, 0.6)", borderRadius: 8 }}>{draft.text}</p>
                 <div style={{ display: "flex", gap: "0.5rem" }}>
-                  <button style={{ ...btnPrimary, opacity: publishing === draft.id ? 0.6 : 1 }} onClick={() => handlePublish(draft)} disabled={publishing === draft.id || !isApiConfigured}>
+                  <button style={{ ...btnPrimary, opacity: publishing === draft.id ? 0.6 : 1 }} onClick={() => handlePublish(draft)} disabled={publishing === draft.id || !hasThreadsToken}>
                     {publishing === draft.id ? "公開中..." : "承認して公開"}
                   </button>
                   <button style={{ ...btnSecondary, borderColor: "rgba(220, 38, 38, 0.3)", color: "#dc2626" }} onClick={() => onUpdateStatus(draft.id, "rejected")}>却下</button>
                 </div>
-                {!isApiConfigured && <p style={{ fontSize: "0.72rem", color: "#ef4444", marginTop: "0.4rem" }}>公開するには設定画面からAPIキーを登録してください</p>}
+                {!hasThreadsToken && <p style={{ fontSize: "0.72rem", color: "#ef4444", marginTop: "0.4rem" }}>公開するには設定画面からThreadsアクセストークンを登録してください</p>}
               </div>
             ))}
           </div>

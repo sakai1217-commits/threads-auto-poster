@@ -13,14 +13,11 @@ export async function GET() {
     return NextResponse.json({ authenticated: false, apiConfigured: false });
   }
 
-  const apiConfigured =
-    !!user.anthropic_api_key &&
-    !!user.threads_access_token &&
-    !!user.threads_user_id;
-
   return NextResponse.json({
     authenticated: true,
-    apiConfigured,
+    apiConfigured: !!user.anthropic_api_key && !!user.threads_access_token,
+    hasAnthropicKey: !!user.anthropic_api_key,
+    hasThreadsToken: !!user.threads_access_token,
     email: user.email,
   });
 }
