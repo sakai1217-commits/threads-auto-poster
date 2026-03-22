@@ -23,7 +23,8 @@ export async function GET(request: NextRequest) {
 
     // Try with rich fields, fall back to basic
     const fieldSets = [
-      "id,text,timestamp,like_count,reply_count,media_type,permalink",
+      "id,text,timestamp,like_count,reply_count,media_type,permalink,is_reply",
+      "id,text,timestamp,like_count,reply_count,permalink",
       "id,text,timestamp,like_count,reply_count",
       "id,text,timestamp",
     ];
@@ -55,14 +56,14 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Fetch replies (conversation threads) if requested
-    let repliesData: Record<string, unknown>[] = [];
+    // Fetch thread continuations (user's own follow-up posts in threads)
+    let continuationData: Record<string, unknown>[] = [];
     if (includeReplies) {
       const repData = await fetchEndpoint("me/replies", limit);
-      repliesData = repData.data || [];
+      continuationData = repData.data || [];
     }
 
-    function mapPost(item: Record<string, unknown>, isReply = false) {
+    function mapPost(item: Record<string, unknown>, isThreadContinuation = false) {
       return {
         id: item.id || "",
         text: (item.text as string) || "",
@@ -72,17 +73,17 @@ export async function GET(request: NextRequest) {
         replies: Number(item.reply_count) || 0,
         mediaType: (item.media_type as string) || "TEXT",
         permalink: (item.permalink as string) || "",
-        isReply,
+        isThreadContinuation,
       };
     }
 
     const posts = (mainData.data || []).map((item: Record<string, unknown>) => mapPost(item, false));
-    const replies = repliesData.map((item) => mapPost(item, true));
+    const continuations = continuationData.map((item) => mapPost(item, true));
 
     return NextResponse.json({
       success: true,
       posts,
-      replies,
+      continuations,
       paging: mainData.paging || null,
     });
   } catch (error) {
