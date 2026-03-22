@@ -682,7 +682,7 @@ function DashboardTab({
 
   useEffect(() => {
     if (!hasThreadsToken) return;
-    authFetch("/api/threads-posts?limit=10", {}, onUnauth)
+    authFetch("/api/threads-posts?limit=10&replies=1", {}, onUnauth)
       .then((r) => r.json())
       .then((d) => { if (d.posts) setThreadsPosts(d.posts); })
       .catch(() => {});
@@ -690,6 +690,7 @@ function DashboardTab({
 
   const totalPosts = threadsPosts.length > 0 ? threadsPosts.length : publishedCount;
   const avgLikes = threadsPosts.length > 0 ? Math.round(threadsPosts.reduce((s, p) => s + p.likes, 0) / threadsPosts.length) : 0;
+  const avgViews = threadsPosts.length > 0 ? Math.round(threadsPosts.reduce((s, p) => s + (p.views || 0), 0) / threadsPosts.length) : 0;
 
   return (
     <div>
@@ -702,6 +703,10 @@ function DashboardTab({
         <div style={statBox}>
           <div style={{ fontSize: "1.6rem", fontWeight: 700, color: "var(--gold-500)" }}>{avgLikes > 0 ? avgLikes : "—"}</div>
           <div style={{ fontSize: "0.75rem", color: "var(--text-secondary)", marginTop: "0.2rem" }}>平均いいね</div>
+        </div>
+        <div style={statBox}>
+          <div style={{ fontSize: "1.6rem", fontWeight: 700, color: "var(--purple-700)" }}>{avgViews > 0 ? avgViews : "—"}</div>
+          <div style={{ fontSize: "0.75rem", color: "var(--text-secondary)", marginTop: "0.2rem" }}>平均表示</div>
         </div>
         <div style={statBox}>
           <div style={{ fontSize: "1.6rem", fontWeight: 700, color: "var(--purple-700)" }}>{scheduleEntries.length}</div>
