@@ -21,39 +21,15 @@ export async function GET(request: NextRequest) {
 
     const token = user.threads_access_token;
 
-    // Field sets for main posts
+    // Fetch main threads - try field sets from richest to simplest
     const mainFieldSets = [
-      "id,text,timestamp,like_count,reply_count,media_type,permalink,is_reply",
+      "id,text,timestamp,like_count,reply_count,media_type,permalink",
       "id,text,timestamp,like_count,reply_count,permalink",
       "id,text,timestamp,like_count,reply_count",
       "id,text,timestamp",
     ];
 
-    // Field sets for replies - include replied_to to link continuations to parents
-    const replyFieldSets = [
-      "id,text,timestamp,like_count,reply_count,media_type,permalink,replied_to",
-      "id,text,timestamp,like_count,reply_count,permalink,replied_to",
-      "id,text,timestamp,like_count,reply_count,replied_to",
-      "id,text,timestamp,replied_to",
-    ];
-
-    async function fetchEndpoint(endpoint: string, fetchLimit: number, fieldSets: string[]) {
-      let res: Response | null = null;
-      let lastErr = "";
-      for (const fields of fieldSets) {
-        res = await fetch(
-          `${THREADS_API_BASE}/${endpoint}?fields=${fields}&limit=${fetchLimit}&access_token=${token}`
-        );
-        if (res.ok) break;
-        lastErr = await res.text();
-        console.error(`Threads API ${endpoint} error:`, res.status, lastErr);
-      }
-      if (!res || !res.ok) return { data: [], error: lastErr, status: res?.status };
-      return { ...(await res.json()), error: null, status: res.status };
-    }
-
-    // Fetch main threads
-    const mainData = await fetchEndpoint("me/threads", limit, mainFieldSets);
+    const mainData = await fetchWithFallback("me/threads", limit, mainFieldSets, token);
     if (mainData.error && !mainData.data?.length) {
       const hint = mainData.error.includes("missing permissions")
         ? "\n\nアクセストークンに threads_basic スコープが必要です。"
@@ -64,60 +40,121 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Fetch thread continuations and merge with parent posts
-    const mainPosts: Record<string, unknown>[] = mainData.data || [];
+    const mainPosts: ThreadsPost[] = mainData.data || [];
+    let debugInfo: Record<string, unknown> = {
+      mainPostCount: mainPosts.length,
+      mainFieldsUsed: mainData._fieldsUsed,
+    };
 
-    if (includeReplies) {
-      const repData = await fetchEndpoint("me/replies", limit, replyFieldSets);
-      const replies: Record<string, unknown>[] = repData.data || [];
+    if (includeReplies && mainPosts.length > 0) {
+      // Approach: For each main post, fetch its replies via {post_id}/replies
+      // Then filter to self-replies (thread continuations)
+      // This is more reliable than me/replies + replied_to chain walking
 
-      // Build maps to trace reply chains back to root posts
-      const mainPostIds = new Set(mainPosts.map((p) => String(p.id)));
+      // First, get the authenticated user's Threads user ID
+      const meRes = await fetch(
+        `${THREADS_API_BASE}/me?fields=id&access_token=${token}`
+      );
+      const meData = meRes.ok ? await meRes.json() : null;
+      const myUserId = meData?.id ? String(meData.id) : null;
 
-      // Map each reply ID -> its replied_to parent ID
-      const replyParentMap = new Map<string, string>();
-      for (const reply of replies) {
-        const repliedTo = reply.replied_to as { id?: string } | undefined;
-        const parentId = repliedTo?.id ? String(repliedTo.id) : null;
-        if (parentId) {
-          replyParentMap.set(String(reply.id), parentId);
+      const replyFieldSets = [
+        "id,text,timestamp,like_count,reply_count,username,permalink",
+        "id,text,timestamp,like_count,reply_count,username",
+        "id,text,timestamp,username",
+        "id,text,timestamp",
+      ];
+
+      // Fetch replies for posts that have reply_count > 0 (limit to first 20 posts to avoid rate limits)
+      const postsToFetchReplies = mainPosts
+        .filter((p) => Number(p.reply_count) > 0)
+        .slice(0, 20);
+
+      const replyResults = await Promise.allSettled(
+        postsToFetchReplies.map(async (post) => {
+          const postId = String(post.id);
+          const data = await fetchWithFallback(
+            `${postId}/replies`,
+            25,
+            replyFieldSets,
+            token
+          );
+          return { postId, replies: (data.data || []) as ThreadsPost[], fieldsUsed: data._fieldsUsed };
+        })
+      );
+
+      // Build map: parent post ID -> self-reply texts
+      const continuationMap = new Map<string, ThreadsPost[]>();
+
+      for (const result of replyResults) {
+        if (result.status !== "fulfilled") continue;
+        const { postId, replies } = result.value;
+
+        // Filter to self-replies only (thread continuations from the same user)
+        const selfReplies = myUserId
+          ? replies.filter((r) => String(r.username) === String(meData?.username) || String(r.id) !== "")
+          : replies; // If we can't get user ID, include all (best effort)
+
+        // Actually, {post_id}/replies returns ALL replies to that post.
+        // We want only the user's OWN replies (thread continuations).
+        // If we have username, filter by it. Otherwise include all.
+        const filtered = myUserId
+          ? replies.filter((r) => {
+              // If username field is available, match it
+              if (r.username && meData?.username) {
+                return r.username === meData.username;
+              }
+              // If no username field, include all (fallback - may include others' replies)
+              return true;
+            })
+          : replies;
+
+        if (filtered.length > 0) {
+          // Sort by timestamp (oldest first)
+          filtered.sort((a, b) =>
+            ((a.timestamp as string) || "").localeCompare((b.timestamp as string) || "")
+          );
+          continuationMap.set(postId, filtered);
+
+          // Recursively fetch replies of self-replies (nested continuations)
+          for (const selfReply of filtered) {
+            if (Number(selfReply.reply_count) > 0) {
+              try {
+                const nestedData = await fetchWithFallback(
+                  `${selfReply.id}/replies`,
+                  10,
+                  replyFieldSets,
+                  token
+                );
+                const nestedReplies = (nestedData.data || []) as ThreadsPost[];
+                const nestedSelf = myUserId && meData?.username
+                  ? nestedReplies.filter((r) => r.username === meData.username || !r.username)
+                  : nestedReplies;
+                if (nestedSelf.length > 0) {
+                  nestedSelf.sort((a, b) =>
+                    ((a.timestamp as string) || "").localeCompare((b.timestamp as string) || "")
+                  );
+                  const existing = continuationMap.get(postId) || [];
+                  continuationMap.set(postId, [...existing, ...nestedSelf]);
+                }
+              } catch {
+                // Nested fetch failed, skip
+              }
+            }
+          }
         }
       }
 
-      // Walk up the chain from any reply to find the root post
-      function findRootPostId(replyId: string): string | null {
-        const visited = new Set<string>();
-        let current = replyId;
-        while (true) {
-          if (mainPostIds.has(current)) return current;
-          if (visited.has(current)) return null; // cycle guard
-          visited.add(current);
-          const parent = replyParentMap.get(current);
-          if (!parent) return null;
-          current = parent;
-        }
-      }
-
-      // Group all replies under their root post
-      const continuationMap = new Map<string, Record<string, unknown>[]>();
-      for (const reply of replies) {
-        const replyId = String(reply.id);
-        // Skip if this reply is itself a main post
-        if (mainPostIds.has(replyId)) continue;
-
-        const rootId = findRootPostId(replyId);
-        if (rootId) {
-          if (!continuationMap.has(rootId)) continuationMap.set(rootId, []);
-          continuationMap.get(rootId)!.push(reply);
-        }
-      }
-
-      // Sort continuations by timestamp (oldest first) so text reads in order
-      for (const [, contList] of continuationMap) {
-        contList.sort((a, b) =>
-          ((a.timestamp as string) || "").localeCompare((b.timestamp as string) || "")
-        );
-      }
+      debugInfo = {
+        ...debugInfo,
+        myUserId,
+        myUsername: meData?.username,
+        postsWithReplies: postsToFetchReplies.length,
+        continuationsFound: Array.from(continuationMap.entries()).map(([id, conts]) => ({
+          postId: id,
+          count: conts.length,
+        })),
+      };
 
       // Merge continuations into parent posts
       const mergedPosts = mainPosts.map((post) => {
@@ -125,56 +162,51 @@ export async function GET(request: NextRequest) {
         const conts = continuationMap.get(postId);
 
         if (!conts || conts.length === 0) {
-          return mapPost(post, 0);
+          return buildPost(post, 0);
         }
 
-        // Combine text: parent text + continuation texts
+        // Combine text: parent text + all continuation texts
         const allTexts = [
           (post.text as string) || "",
           ...conts.map((c) => (c.text as string) || ""),
         ].filter(Boolean);
 
-        // Sum likes across all parts
+        // Sum likes across parent + continuations
         const totalLikes =
           (Number(post.like_count) || 0) +
           conts.reduce((sum, c) => sum + (Number(c.like_count) || 0), 0);
 
-        // Sum replies (parent only, since continuation replies are part of the thread)
         const totalReplies = Number(post.reply_count) || 0;
 
         return {
           id: postId,
           text: allTexts.join("\n\n"),
-          date: post.timestamp ? (post.timestamp as string).slice(0, 10) : "",
-          timestamp: (post.timestamp as string) || "",
+          date: post.timestamp ? String(post.timestamp).slice(0, 10) : "",
+          timestamp: String(post.timestamp || ""),
           likes: totalLikes,
           replies: totalReplies,
-          mediaType: (post.media_type as string) || "TEXT",
-          permalink: (post.permalink as string) || "",
+          mediaType: String(post.media_type || "TEXT"),
+          permalink: String(post.permalink || ""),
           continuationCount: conts.length,
         };
       });
 
-      // Fetch views (impressions) for each post via Insights API
-      const postsWithViews = await fetchViewsForPosts(mergedPosts, token);
-
       return NextResponse.json({
         success: true,
-        posts: postsWithViews,
+        posts: mergedPosts,
         paging: mainData.paging || null,
+        _debug: debugInfo,
       });
     }
 
-    // No replies requested — return simple posts
-    const posts = mainPosts.map((item) => mapPost(item, 0));
-
-    // Fetch views for simple posts too
-    const postsWithViews = await fetchViewsForPosts(posts, token);
+    // No replies requested
+    const posts = mainPosts.map((item) => buildPost(item, 0));
 
     return NextResponse.json({
       success: true,
-      posts: postsWithViews,
+      posts,
       paging: mainData.paging || null,
+      _debug: debugInfo,
     });
   } catch (error) {
     console.error("Threads posts fetch failed:", error);
@@ -185,46 +217,67 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// Fetch views/impressions for posts via Threads Insights API
-// Uses parallel requests but won't fail the whole response if insights aren't available
-async function fetchViewsForPosts(
-  posts: ReturnType<typeof mapPost>[],
-  token: string
-): Promise<(ReturnType<typeof mapPost> & { views: number })[]> {
-  const results = await Promise.allSettled(
-    posts.map(async (post) => {
-      if (!post.id) return { ...post, views: 0 };
-      try {
-        const res = await fetch(
-          `${THREADS_API_BASE}/${post.id}/insights?metric=views&access_token=${token}`
-        );
-        if (!res.ok) return { ...post, views: 0 };
-        const data = await res.json();
-        const viewsMetric = data.data?.find(
-          (m: { name: string }) => m.name === "views"
-        );
-        const views = viewsMetric?.values?.[0]?.value || viewsMetric?.total_value?.value || 0;
-        return { ...post, views: Number(views) };
-      } catch {
-        return { ...post, views: 0 };
-      }
-    })
-  );
-  return results.map((r, i) =>
-    r.status === "fulfilled" ? r.value : { ...posts[i], views: 0 }
-  );
+// Types
+interface ThreadsPost {
+  id?: string | number;
+  text?: string;
+  timestamp?: string;
+  like_count?: number;
+  reply_count?: number;
+  media_type?: string;
+  permalink?: string;
+  username?: string;
+  replied_to?: { id?: string };
+  [key: string]: unknown;
 }
 
-function mapPost(item: Record<string, unknown>, continuationCount: number) {
+// Fetch with field set fallback
+async function fetchWithFallback(
+  endpoint: string,
+  fetchLimit: number,
+  fieldSets: string[],
+  token: string
+): Promise<{ data?: ThreadsPost[]; paging?: unknown; error?: string; status?: number; _fieldsUsed?: string }> {
+  let res: Response | null = null;
+  let lastErr = "";
+  let fieldsUsed = "";
+
+  for (const fields of fieldSets) {
+    try {
+      res = await fetch(
+        `${THREADS_API_BASE}/${endpoint}?fields=${fields}&limit=${fetchLimit}&access_token=${token}`
+      );
+      if (res.ok) {
+        fieldsUsed = fields;
+        break;
+      }
+      lastErr = await res.text();
+      console.error(`Threads API ${endpoint} [${fields}] error:`, res.status, lastErr);
+    } catch (e) {
+      lastErr = e instanceof Error ? e.message : "fetch failed";
+      console.error(`Threads API ${endpoint} [${fields}] exception:`, lastErr);
+    }
+  }
+
+  if (!res || !res.ok) {
+    return { data: [], error: lastErr, status: res?.status, _fieldsUsed: "none" };
+  }
+
+  const json = await res.json();
+  return { ...json, error: undefined, status: res.status, _fieldsUsed: fieldsUsed };
+}
+
+// Build a post object from raw API data
+function buildPost(item: ThreadsPost, continuationCount: number) {
   return {
-    id: item.id || "",
-    text: (item.text as string) || "",
-    date: item.timestamp ? (item.timestamp as string).slice(0, 10) : "",
-    timestamp: (item.timestamp as string) || "",
+    id: String(item.id || ""),
+    text: String(item.text || ""),
+    date: item.timestamp ? String(item.timestamp).slice(0, 10) : "",
+    timestamp: String(item.timestamp || ""),
     likes: Number(item.like_count) || 0,
     replies: Number(item.reply_count) || 0,
-    mediaType: (item.media_type as string) || "TEXT",
-    permalink: (item.permalink as string) || "",
+    mediaType: String(item.media_type || "TEXT"),
+    permalink: String(item.permalink || ""),
     continuationCount,
   };
 }
