@@ -155,9 +155,12 @@ export async function GET(request: NextRequest) {
         };
       });
 
+      // Fetch views (impressions) for each post via Insights API
+      const postsWithViews = await fetchViewsForPosts(mergedPosts, token);
+
       return NextResponse.json({
         success: true,
-        posts: mergedPosts,
+        posts: postsWithViews,
         paging: mainData.paging || null,
       });
     }
@@ -165,9 +168,12 @@ export async function GET(request: NextRequest) {
     // No replies requested — return simple posts
     const posts = mainPosts.map((item) => mapPost(item, 0));
 
+    // Fetch views for simple posts too
+    const postsWithViews = await fetchViewsForPosts(posts, token);
+
     return NextResponse.json({
       success: true,
-      posts,
+      posts: postsWithViews,
       paging: mainData.paging || null,
     });
   } catch (error) {
@@ -177,6 +183,36 @@ export async function GET(request: NextRequest) {
       { status: 500 }
     );
   }
+}
+
+// Fetch views/impressions for posts via Threads Insights API
+// Uses parallel requests but won't fail the whole response if insights aren't available
+async function fetchViewsForPosts(
+  posts: ReturnType<typeof mapPost>[],
+  token: string
+): Promise<(ReturnType<typeof mapPost> & { views: number })[]> {
+  const results = await Promise.allSettled(
+    posts.map(async (post) => {
+      if (!post.id) return { ...post, views: 0 };
+      try {
+        const res = await fetch(
+          `${THREADS_API_BASE}/${post.id}/insights?metric=views&access_token=${token}`
+        );
+        if (!res.ok) return { ...post, views: 0 };
+        const data = await res.json();
+        const viewsMetric = data.data?.find(
+          (m: { name: string }) => m.name === "views"
+        );
+        const views = viewsMetric?.values?.[0]?.value || viewsMetric?.total_value?.value || 0;
+        return { ...post, views: Number(views) };
+      } catch {
+        return { ...post, views: 0 };
+      }
+    })
+  );
+  return results.map((r, i) =>
+    r.status === "fulfilled" ? r.value : { ...posts[i], views: 0 }
+  );
 }
 
 function mapPost(item: Record<string, unknown>, continuationCount: number) {

@@ -23,6 +23,7 @@ interface PostRecord {
   date: string;
   likes: number;
   replies: number;
+  views?: number;
   permalink?: string;
   continuationCount?: number;
 }
@@ -743,7 +744,7 @@ function DashboardTab({
               <div key={i} style={{ padding: "0.65rem 0.75rem", borderRadius: 10, background: "rgba(107, 33, 168, 0.04)" }}>
                 <p style={{ fontSize: "0.82rem", lineHeight: 1.5, marginBottom: "0.3rem", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{post.text}</p>
                 <div style={{ display: "flex", gap: "1rem", fontSize: "0.7rem", color: "var(--text-muted)" }}>
-                  <span>{post.date}</span><span>{post.likes} いいね</span><span>{post.replies} 返信</span>
+                  <span>{post.date}</span><span>{post.likes} いいね</span><span>{post.replies} 返信</span>{(post.views || 0) > 0 && <span>{post.views} 表示</span>}
                 </div>
               </div>
             ))}
@@ -975,6 +976,7 @@ function AnalyticsTab({
   const topPosts = [...threadsPosts].sort((a, b) => (b.likes + b.replies * 2) - (a.likes + a.replies * 2)).slice(0, 5);
   const avgLikes = threadsPosts.length > 0 ? Math.round(threadsPosts.reduce((s, p) => s + p.likes, 0) / threadsPosts.length) : 0;
   const avgReplies = threadsPosts.length > 0 ? Math.round(threadsPosts.reduce((s, p) => s + p.replies, 0) / threadsPosts.length) : 0;
+  const avgViews = threadsPosts.length > 0 ? Math.round(threadsPosts.reduce((s, p) => s + (p.views || 0), 0) / threadsPosts.length) : 0;
 
   const handleAnalyze = async () => {
     if (!isApiConfigured) { setError("設定画面からAnthropic APIキーを登録してください"); return; }
@@ -1063,6 +1065,7 @@ function AnalyticsTab({
         <div style={statBox}><div style={{ fontSize: "1.6rem", fontWeight: 700, color: "var(--purple-700)" }}>{threadsPosts.length || "—"}</div><div style={{ fontSize: "0.75rem", color: "var(--text-secondary)", marginTop: "0.2rem" }}>投稿数</div></div>
         <div style={statBox}><div style={{ fontSize: "1.6rem", fontWeight: 700, color: "var(--purple-700)" }}>{avgLikes || "—"}</div><div style={{ fontSize: "0.75rem", color: "var(--text-secondary)", marginTop: "0.2rem" }}>平均いいね</div></div>
         <div style={statBox}><div style={{ fontSize: "1.6rem", fontWeight: 700, color: "var(--gold-500)" }}>{avgReplies || "—"}</div><div style={{ fontSize: "0.75rem", color: "var(--text-secondary)", marginTop: "0.2rem" }}>平均返信</div></div>
+        <div style={statBox}><div style={{ fontSize: "1.6rem", fontWeight: 700, color: "var(--text-secondary)" }}>{avgViews || "—"}</div><div style={{ fontSize: "0.75rem", color: "var(--text-secondary)", marginTop: "0.2rem" }}>平均表示</div></div>
       </div>
 
       <div style={{ ...card, marginBottom: "1.5rem" }}>
@@ -1181,6 +1184,7 @@ function AnalyticsTab({
                   <span>{post.date}</span>
                   <span style={{ fontWeight: 700, color: "var(--purple-700)", fontSize: "0.8rem" }}>{post.likes} いいね</span>
                   <span style={{ fontWeight: 700, color: "var(--gold-600)", fontSize: "0.8rem" }}>{post.replies} 返信</span>
+                  {(post.views || 0) > 0 && <span style={{ fontWeight: 700, color: "var(--text-secondary)", fontSize: "0.8rem" }}>{post.views} 表示</span>}
                   {(post.continuationCount || 0) > 0 && <span style={{ fontSize: "0.72rem", color: "var(--purple-500)" }}>{post.continuationCount}件のスレッド</span>}
                   {post.permalink && <a href={post.permalink} target="_blank" rel="noopener noreferrer" style={{ color: "var(--purple-500)", textDecoration: "none" }}>Threadsで見る</a>}
                 </div>
@@ -1361,6 +1365,7 @@ function RecentPostsTab({ isApiConfigured, onUnauth }: { isApiConfigured: boolea
               <span>{post.date}</span>
               <span style={{ fontWeight: 600, color: "var(--purple-700)" }}>{post.likes} いいね</span>
               <span style={{ fontWeight: 600, color: "var(--gold-600)" }}>{post.replies} 返信</span>
+              {(post.views || 0) > 0 && <span style={{ fontWeight: 600, color: "var(--text-secondary)" }}>{post.views} 表示</span>}
               {(post.continuationCount || 0) > 0 && <span style={{ fontSize: "0.72rem", color: "var(--purple-500)" }}>{post.continuationCount}件のスレッド</span>}
               {post.permalink && <a href={post.permalink} target="_blank" rel="noopener noreferrer" style={{ color: "var(--purple-500)", textDecoration: "none" }}>Threadsで見る</a>}
             </div>
