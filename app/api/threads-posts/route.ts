@@ -71,17 +71,44 @@ export async function GET(request: NextRequest) {
       const repData = await fetchEndpoint("me/replies", limit, replyFieldSets);
       const replies: Record<string, unknown>[] = repData.data || [];
 
-      // Build a map of parent post ID -> continuations
-      const continuationMap = new Map<string, Record<string, unknown>[]>();
+      // Build maps to trace reply chains back to root posts
       const mainPostIds = new Set(mainPosts.map((p) => String(p.id)));
 
+      // Map each reply ID -> its replied_to parent ID
+      const replyParentMap = new Map<string, string>();
       for (const reply of replies) {
         const repliedTo = reply.replied_to as { id?: string } | undefined;
         const parentId = repliedTo?.id ? String(repliedTo.id) : null;
+        if (parentId) {
+          replyParentMap.set(String(reply.id), parentId);
+        }
+      }
 
-        if (parentId && mainPostIds.has(parentId)) {
-          if (!continuationMap.has(parentId)) continuationMap.set(parentId, []);
-          continuationMap.get(parentId)!.push(reply);
+      // Walk up the chain from any reply to find the root post
+      function findRootPostId(replyId: string): string | null {
+        const visited = new Set<string>();
+        let current = replyId;
+        while (true) {
+          if (mainPostIds.has(current)) return current;
+          if (visited.has(current)) return null; // cycle guard
+          visited.add(current);
+          const parent = replyParentMap.get(current);
+          if (!parent) return null;
+          current = parent;
+        }
+      }
+
+      // Group all replies under their root post
+      const continuationMap = new Map<string, Record<string, unknown>[]>();
+      for (const reply of replies) {
+        const replyId = String(reply.id);
+        // Skip if this reply is itself a main post
+        if (mainPostIds.has(replyId)) continue;
+
+        const rootId = findRootPostId(replyId);
+        if (rootId) {
+          if (!continuationMap.has(rootId)) continuationMap.set(rootId, []);
+          continuationMap.get(rootId)!.push(reply);
         }
       }
 
@@ -117,7 +144,7 @@ export async function GET(request: NextRequest) {
 
         return {
           id: postId,
-          text: allTexts.join("\n\n---\n\n"),
+          text: allTexts.join("\n\n"),
           date: post.timestamp ? (post.timestamp as string).slice(0, 10) : "",
           timestamp: (post.timestamp as string) || "",
           likes: totalLikes,
