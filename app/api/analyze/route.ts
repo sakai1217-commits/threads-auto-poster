@@ -104,8 +104,19 @@ ${posts.map((p: { text: string; date: string; likes: number; replies: number }, 
     return NextResponse.json({ success: true, analysis: parsed });
   } catch (error) {
     console.error("Analyze failed:", error);
+    const msg = error instanceof Error ? error.message : String(error);
+    let userMsg = "分析に失敗しました";
+    if (msg.includes("credit balance is too low") || msg.includes("billing")) {
+      userMsg = "Anthropic APIのクレジット残高が不足しています。Anthropicの管理画面でクレジットを追加してください。";
+    } else if (msg.includes("invalid_api_key") || msg.includes("authentication")) {
+      userMsg = "Anthropic APIキーが無効です。設定画面で正しいキーを入力してください。";
+    } else if (msg.includes("rate_limit") || msg.includes("429")) {
+      userMsg = "APIのリクエスト制限に達しました。しばらく待ってから再度お試しください。";
+    } else {
+      userMsg = msg;
+    }
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "分析に失敗しました" },
+      { error: userMsg },
       { status: 500 }
     );
   }

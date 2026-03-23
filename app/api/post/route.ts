@@ -111,8 +111,17 @@ ${referenceData ? `\n参考データ（競合投稿やトレンド情報）:\n${
     });
   } catch (error) {
     console.error("Post failed:", error);
+    const msg = error instanceof Error ? error.message : String(error);
+    let userMsg = "投稿に失敗しました";
+    if (msg.includes("credit balance is too low") || msg.includes("billing")) {
+      userMsg = "Anthropic APIのクレジット残高が不足しています。Anthropicの管理画面でクレジットを追加してください。";
+    } else if (msg.includes("invalid_api_key") || msg.includes("authentication")) {
+      userMsg = "Anthropic APIキーが無効です。設定画面で正しいキーを入力してください。";
+    } else {
+      userMsg = msg;
+    }
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "不明なエラー" },
+      { error: userMsg },
       { status: 500 }
     );
   }
